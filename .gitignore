@@ -1,0 +1,22 @@
+# intellij
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# logs
+*.log
+logs/
+*.pid
+*.seed
+
+# tmp
+*.swp
+*.tmp
+*.bak
+*.orig
+*.back
+
+# OS
+.DS_Store
+Thumbs.db
