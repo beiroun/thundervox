@@ -6,4 +6,4 @@ services:
       - "5060:5060/udp"
       - "5060:5060/tcp"
     volumes:
-      - ./kamailio.cfg:/usr/local/etc/kamailio/kamailio.cfg
+      - ./configuration/kamailio.cfg:/usr/local/etc/kamailio/kamailio.cfg
