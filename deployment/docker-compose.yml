@@ -15,5 +15,5 @@ services:
     image: sippylabs/rtpproxy
     container_name: thundervox-rtpproxy
     network_mode: host
-    command: [ "-l", "188.225.72.135", "-s", "udp:127.0.0.1:22222", "-m", "20000", "-M", "30000" ]
+    command: [ "-l", "10.10.14.1/188.225.72.135", "-s", "udp:127.0.0.1:22222", "-m", "20000", "-M", "30000" ]
     restart: always
