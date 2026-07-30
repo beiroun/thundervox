@@ -5,15 +5,19 @@ services:
     network_mode: host
     volumes:
       - ./configuration/kamailio.cfg:/etc/kamailio/kamailio.cfg
-      - ./log/kamailio:/var/log/kamailio
     environment:
       - DBENGINE=NONE
       - TZ=Asia/Omsk
     restart: always
 
-  rtpproxy:
-    image: sippylabs/rtpproxy
-    container_name: thundervox-rtpproxy
+  rtpengine:
+    image: fonoster/rtpengine
+    container_name: thundervox-rtpengine
     network_mode: host
-    command: -l 10.10.14.1 -A 188.225.72.135 -s udp:127.0.0.1:22222 -m 20000 -M 30000
     restart: always
+    environment:
+      RTPENGINE_PUBLIC_IP: "188.225.72.135"
+      RTPENGINE_BIND_NG_PORT: "4444"
+      RTPENGINE_PORT_MIN: "20000"
+      RTPENGINE_PORT_MAX: "30000"
+      RTPENGINE_LOG_LEVEL: "7"
