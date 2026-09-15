@@ -1,23 +1,48 @@
+# ThunderVox — SIP core deployment (prototype, single host)
+# ==========================================================
+# Two host-networked containers:
+#   - kamailio:   SIP signaling + registrar + push-wait routing
+#   - rtpengine:  media (RTP/RTCP) relay + NAT traversal, UDP ports 29000-30000
+#
+# Host networking is required so rtpengine uses the host's public IP directly and
+# opens the RTP port range without Docker port-mapping overhead. Linux only.
+#
+# Site-local values are NOT in this repository: the host address comes from .env
+# (copy .env.example), the kamailio secrets from configuration/local.cfg (copy
+# configuration/local.cfg.example). TVX_PUBLIC_IP in .env and TVX_PUBLIC_IP in
+# local.cfg MUST be the same real public IP — one feeds rtpengine, the other SIP.
+#
+# Firewall: open UDP 5060 (SIP) and UDP 29000-30000 (RTP) to the internet.
+
 services:
   kamailio:
     image: ghcr.io/kamailio/kamailio:6.0.1-bookworm
     container_name: thundervox-kamailio
     network_mode: host
     volumes:
-      - ./configuration/kamailio.cfg:/etc/kamailio/kamailio.cfg
+      # read-only mounts: the routing logic is version-controlled in this repo,
+      # the site-local values (public IP, push URL, service token) are not
+      - ./configuration/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./configuration/local.cfg:/etc/kamailio/local.cfg:ro
     environment:
-      - DBENGINE=NONE
+      - DBENGINE=NONE        # in-memory usrloc, no database (prototype scope)
       - TZ=Asia/Omsk
+    depends_on:
+      - rtpengine            # ordering only; kamailio retries the ng socket at runtime
     restart: always
 
   rtpengine:
-    image: fonoster/rtpengine
+    # Pinned tag (= what "latest" resolved to on 2026-09-15): SIP is about
+    # stability, deploys must be reproducible.
+    image: fonoster/rtpengine:0.3.17
     container_name: thundervox-rtpengine
     network_mode: host
-    restart: always
     environment:
-      RTPENGINE_PUBLIC_IP: "188.225.72.135"
-      RTPENGINE_BIND_NG_PORT: "4444"
-      RTPENGINE_PORT_MIN: "20000"
+      # fails fast if .env is missing instead of binding media on a bogus address
+      RTPENGINE_PUBLIC_IP: "${TVX_PUBLIC_IP:?set TVX_PUBLIC_IP in deployment/.env}"
+      RTPENGINE_BIND_NG_PORT: "4444"          # ng control port kamailio talks to
+      RTPENGINE_PORT_MIN: "29000"             # narrow test pool (~250 concurrent calls); widen for production
       RTPENGINE_PORT_MAX: "30000"
-      RTPENGINE_LOG_LEVEL: "7"
+      RTPENGINE_LOG_LEVEL: "6"                # 6=info; raise to 7 for verbose media debug
+      TZ: "Asia/Omsk"
+    restart: always

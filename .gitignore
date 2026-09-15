@@ -1,3 +1,19 @@
+# secrets / site-local config — NEVER commit (repo is meant to go public)
+deployment/.env
+.env
+.env.local
+deployment/configuration/local.cfg
+local.cfg
+secrets.cfg
+*.secrets
+
+# credentials / TLS material
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+
 # intellij
 .idea/
 *.iml

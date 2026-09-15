@@ -1,0 +1,20 @@
+# ThunderVox — site-local values (template)
+# =========================================
+# Copy to local.cfg and fill in for your server. local.cfg is gitignored and is
+# pulled into kamailio.cfg by "include_file" — never commit the filled-in copy.
+#
+# substdef performs a textual replace everywhere in the config, including inside
+# strings, so a value can appear both bare (listen/advertise) and inside JSON
+# (push body) with the same definition.
+
+# Server public IP. MUST equal TVX_PUBLIC_IP in deployment/.env (which feeds
+# RTPENGINE_PUBLIC_IP). Advertised in Via/Record-Route/Contact so signaling is
+# reachable even when the host interface holds a private (1:1 cloud-NATed) address.
+#!substdef "!TVX_PUBLIC_IP!203.0.113.10!g"
+
+# Push gateway: HTTP endpoint that delivers APNs/FCM pushes to wake the device.
+#!substdef "!TVX_PUSH_URL!http://push.example.com/api/tv-sip/test!g"
+
+# Service token sent as X-SERVICE-TOKEN. MUST equal the token the push gateway
+# expects (SERVICE_TV_SIP_TOKEN in the backend environment).
+#!substdef "!TVX_PUSH_TOKEN!replace-with-real-token!g"
