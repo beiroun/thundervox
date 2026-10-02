@@ -1,0 +1,102 @@
+# ThunderVox
+
+**SIP endpoint platform.** Intercoms, elevators, gates and SOS points place
+calls to mobile apps that are *not* continuously registered. ThunderVox parks
+the call, wakes the phone with a push, and connects the two when the app
+registers. Built on **Kamailio** and **rtpengine**, with its own provisioning
+server and web console.
+
+This is the **umbrella repository**: the project charter, the architecture
+overview, licensing and the deployment of the whole system. Code lives in the
+component repositories below.
+
+---
+
+## Components
+
+| Repository | Role | Image | Status |
+|---|---|---|---|
+| [`thundervox-core`](https://github.com/beiroun/thundervox-core) | SIP signaling, registrar, NAT traversal, push-wait routing; media relay | `ghcr.io/beiroun/thundervox-core`, `ghcr.io/beiroun/thundervox-rtpengine` | v0.6 — stable calls on a test host with a real intercom panel |
+| [`thundervox-server`](https://github.com/beiroun/thundervox-server) | Provisioning: tenants, sites, devices, app clients, SIP accounts; the core's authentication source; admin and service API | `ghcr.io/beiroun/thundervox-server` | in design |
+| [`thundervox-web`](https://github.com/beiroun/thundervox-web) | Operator console: devices, clients, registrations, live calls | `ghcr.io/beiroun/thundervox-web` | in design |
+| `thundervox` (this repo) | Charter, architecture, licensing, `docker-compose` of the whole system, deployment runbook | — | documents only |
+
+## How it fits together
+
+```
+ intercom / elevator / SOS panel        mobile app (asleep until pushed)
+            │ SIP (digest auth)                  ▲ SIP after wake-up
+            ▼                                    │
+   ┌──────────────────┐   RTP   ┌───────────┐   │
+   │  thundervox-core │◀───────▶│ rtpengine │◀──┘  media anchored on the relay
+   │  (Kamailio)      │         └───────────┘
+   └───────┬──────────┘
+           │ auth_db / usrloc (SQL)          JSON-RPC (localhost)
+           ▼                                   ▲
+   ┌──────────────────┐                ┌───────┴───────────┐      ┌────────────────┐
+   │   PostgreSQL     │◀──────────────▶│ thundervox-server │◀────▶│ thundervox-web │
+   └──────────────────┘   JDBC         └───────┬───────────┘ /api └────────────────┘
+                                               │ service API
+                                               ▼
+                                     operator backend / push gateway (external)
+```
+
+- **Push-wait** is the core idea: the callee is normally offline, so the INVITE
+  is parked, the device is woken by a push, and the call is resumed when the
+  app registers. Details in `thundervox-core`.
+- **Devices register directly** with the core — no PBX in between. The platform
+  is the endpoint layer on top of plain SIP, and the real product is the set of
+  vendor adapters that make real-world panels behave.
+- **The core talks only to PostgreSQL** for authentication and registrations;
+  there is no HTTP in the SIP path. The server owns the schema and reaches the
+  core through a local JSON-RPC socket for live state.
+
+## Principles
+
+- **Own images for everything.** Each component repository builds its image
+  from pinned sources (Kamailio and rtpengine are built from source) and
+  publishes it to GHCR on a tagged release. Only Docker Official Images are
+  used as bases.
+- **The host keeps only this repository.** A `docker-compose.yml`, `.env` and
+  `local.cfg` — no component sources, no builds on the server. Updating a
+  component means bumping an image tag.
+- **One host, Docker Compose, host networking.** Kubernetes comes with the
+  second node, not before.
+- **Security by provisioning, not by file.** Credentials live in the database
+  and are managed through the console; the config files carry no secrets.
+
+## Deployment (this repository)
+
+```
+deploy/
+  docker-compose.yml    core, rtpengine, postgres, server, web — pinned image tags
+  .env.example          host address, database passwords, tokens
+  local.cfg.example     site-local values and switches for the core
+  RUNBOOK.md            bring-up, update, rollback, checks
+```
+
+The deployment layout lands together with the first provisioning release;
+until then the core runs from `thundervox-core/deployment` on its own.
+
+## Status
+
+- 2026-10: core v0.6 — plain calls between registered devices are stable
+  (NAT on both legs, cancel/bye/re-INVITE/early media, caller identity by
+  registration, `403` for unregistered sources). Push-wait is implemented as a
+  switch and is next in line for live testing.
+- Next: the provisioning layer (server + console + PostgreSQL-backed auth) and
+  the move to images built from source.
+
+## License
+
+ThunderVox is released under the **Business Source License 1.1** — see
+[`LICENSE`](LICENSE). The same license and parameters apply to every
+component repository. Non-production use is free; production use beyond the
+Additional Use Grant requires a commercial license from the Licensor.
+
+Third-party components (Kamailio, rtpengine, PostgreSQL, nginx, Spring,
+React, …) keep their own licenses — see [`NOTICE`](NOTICE).
+
+---
+
+*Built by [Andrei Baranov](https://github.com/beiroun) · 84softworks*

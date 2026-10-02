@@ -1,0 +1,30 @@
+ThunderVox - third-party components
+====================================
+
+ThunderVox code in the beiroun/thundervox, thundervox-core, thundervox-server
+and thundervox-web repositories is licensed under the Business Source License
+1.1 (see LICENSE). It builds on and ships alongside third-party software that
+keeps its own license. Nothing in the ThunderVox license changes the terms
+under which these components are provided.
+
+Component            Used in           License (verify against the pinned tag)
+-------------------  ----------------  ------------------------------------------
+Kamailio             thundervox-core   GPL-2.0-or-later (core; some modules BSD)
+rtpengine (Sipwise)  thundervox-core   GPL-3.0-or-later
+PostgreSQL           deployment        PostgreSQL License
+nginx                thundervox-web    BSD-2-Clause
+Debian (base image)  all images        various (Debian Free Software Guidelines)
+Eclipse Temurin JRE  thundervox-server GPL-2.0 with Classpath Exception
+Kotlin               thundervox-server Apache-2.0
+Spring Boot          thundervox-server Apache-2.0
+Node.js (build)      thundervox-web    MIT
+TypeScript           thundervox-web    Apache-2.0
+React                thundervox-web    MIT
+Vite                 thundervox-web    MIT
+React Router         thundervox-web    MIT
+Redux Toolkit        thundervox-web    MIT
+Mantine              thundervox-web    MIT
+
+The ThunderVox images only package these components; their source code and
+licenses are available from the respective upstream projects. The exact
+versions are pinned in each component repository (Dockerfile, build files).
