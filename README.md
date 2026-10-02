@@ -71,7 +71,6 @@ component repositories below.
 deploy/
   docker-compose.yml    core, rtpengine, postgres, server, web — pinned image tags, profiles
   .env.example          host address, database passwords
-  local.cfg.example     site-local values and switches for the core
   RUNBOOK.md            bring-up, migration from the old layout, update, rollback, checks, backup
 ```
 

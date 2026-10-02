@@ -18,8 +18,10 @@ One host, Docker Compose, published images. The host keeps this directory only: 
 git clone https://github.com/beiroun/thundervox.git /opt/thundervox
 cd /opt/thundervox/deploy
 cp .env.example .env            # fill TVX_PUBLIC_IP (and TVX_LOCAL_IP on a 1:1 NAT host)
-cp local.cfg.example local.cfg  # fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
 docker compose pull
+# the core's local.cfg template ships inside its image - one source, no copy in this repository
+docker compose run --rm --entrypoint cat core /etc/kamailio/local.cfg.example > local.cfg
+#   fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
 docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg   # config check: must end without "ERROR"
 docker compose up -d
 docker compose logs -f core | grep --line-buffered TVX
@@ -28,7 +30,7 @@ docker compose logs -f core | grep --line-buffered TVX
 Then the proof: register a softphone, register the intercom panel, place a call. Expected log lines are described
 in `thundervox-core/README.md` ("Test with Zoiper").
 
-### Moving from `thundervox-core/deployment` (hosts set up before 0.7.0)
+### Moving from `thundervox-core/deployment` (hosts set up before 0.7.0, when the core repository still carried its own compose)
 
 The core used to run from a clone of `thundervox-core`. The configuration files are the same; only their home
 changes.
@@ -51,7 +53,8 @@ Arrives with core 0.7 and server/web 0.1. Order, once the images exist:
    `tvx_sip` role. Check: `docker compose logs server | grep -i flyway`.
 3. `docker compose --profile provisioning up -d web` – console on port 80; `GET /api/v1/info` answers through nginx.
 4. In the console: create the site, the devices, issue passwords; enter them into the panels and softphones.
-5. In `local.cfg`: `#!define TVX_PROVISIONING` and `TVX_DB_URL` with the `tvx_sip` password;
+5. In `local.cfg`: `#!define TVX_PROVISIONING` and `TVX_DB_URL` with the `tvx_sip` password (the template of
+   core 0.8 documents both; refresh it from the new image with the same `cat` command when upgrading);
    `docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg`, then `docker compose up -d core`.
    From now on REGISTER without credentials gets `401`, unknown accounts cannot register.
 

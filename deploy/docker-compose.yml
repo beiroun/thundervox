@@ -2,8 +2,8 @@
 # Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
 # ThunderVox - the whole system on one host
 # ==========================================
-# This directory is the only thing that lives on the server: this file, .env and local.cfg (copied from the
-# *.example files next to it). No component sources, no builds on the host - every service is a published image,
+# This directory is the only thing that lives on the server: this file, .env (from .env.example) and local.cfg
+# (its template ships inside the core image: docker compose run --rm --entrypoint cat core /etc/kamailio/local.cfg.example). No component sources, no builds on the host - every service is a published image,
 # pinned to the version it was tested with. Updating a component = bump its tag here -> commit -> on the server
 # `git pull && docker compose pull && docker compose up -d`.
 #
