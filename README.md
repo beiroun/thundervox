@@ -69,14 +69,16 @@ component repositories below.
 
 ```
 deploy/
-  docker-compose.yml    core, rtpengine, postgres, server, web — pinned image tags
-  .env.example          host address, database passwords, tokens
+  docker-compose.yml    core, rtpengine, postgres, server, web — pinned image tags, profiles
+  .env.example          host address, database passwords
   local.cfg.example     site-local values and switches for the core
-  RUNBOOK.md            bring-up, update, rollback, checks
+  RUNBOOK.md            bring-up, migration from the old layout, update, rollback, checks, backup
 ```
 
-The deployment layout lands together with the first provisioning release;
-until then the core runs from `thundervox-core/deployment` on its own.
+`docker compose up -d` runs the bare core (`core` + `rtpengine`, as tested on
+the stand); `docker compose --profile provisioning up -d` adds PostgreSQL, the
+server and the console once their images are published. The host keeps this
+directory only — see [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
 
 ## Status
 
@@ -84,8 +86,10 @@ until then the core runs from `thundervox-core/deployment` on its own.
   (NAT on both legs, cancel/bye/re-INVITE/early media, caller identity by
   registration, `403` for unregistered sources). Push-wait is implemented as a
   switch and is next in line for live testing.
-- Next: the provisioning layer (server + console + PostgreSQL-backed auth) and
-  the move to images built from source.
+- 2026-10: own images built from source (core 0.6.1), server and console
+  skeletons, the deployment moved here. Next: the provisioning layer itself —
+  accounts in PostgreSQL, the core authenticating against them, the console
+  pages.
 
 ## License
 

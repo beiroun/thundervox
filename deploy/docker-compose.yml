@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
+# ThunderVox - the whole system on one host
+# ==========================================
+# This directory is the only thing that lives on the server: this file, .env and local.cfg (copied from the
+# *.example files next to it). No component sources, no builds on the host - every service is a published image,
+# pinned to the version it was tested with. Updating a component = bump its tag here -> commit -> on the server
+# `git pull && docker compose pull && docker compose up -d`.
+#
+# Every service runs with network_mode: host: one host, no bridge NAT, 127.0.0.1 means the same thing for all of
+# them. Only SIP, RTP and HTTP face the internet; the database, the server API and the rtpengine control socket
+# listen on loopback.
+#
+# Profiles:
+#   (none)         core + rtpengine - the bare SIP core, as tested on the stand (TVX_PROVISIONING off)
+#   provisioning   + postgres + server + web - the provisioning layer (accounts, auth, console)
+#
+# Config check of the core before (re)starting it - fails fast on a typo in local.cfg:
+#   docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg
+#
+# Firewall: UDP+TCP 5060 (SIP), UDP 29000-30000 (RTP), TCP 80 (console; 443 when TLS is set up).
+
+services:
+  core:
+    image: ghcr.io/beiroun/thundervox-core:0.7.0
+    container_name: thundervox-core
+    network_mode: host
+    volumes:
+      # Only the site-local file is mounted; kamailio.cfg is part of the image. A missing local.cfg fails the
+      # start on purpose (include_file) instead of running with somebody else's defaults.
+      - ./local.cfg:/etc/kamailio/local.cfg:ro
+    environment:
+      TZ: "Asia/Omsk"
+    depends_on:
+      - rtpengine            # ordering only; the core retries the ng socket at runtime
+    restart: always
+
+  rtpengine:
+    image: ghcr.io/beiroun/thundervox-rtpengine:0.7.0
+    container_name: thundervox-rtpengine
+    network_mode: host
+    environment:
+      # fails fast if .env is missing instead of advertising media on a bogus address
+      TVX_PUBLIC_IP: "${TVX_PUBLIC_IP:?set TVX_PUBLIC_IP in deploy/.env}"
+      TVX_LOCAL_IP: "${TVX_LOCAL_IP:-}"       # only when the host's interface address differs from the public one (1:1 NAT)
+      TVX_RTP_NG_PORT: "4444"                 # ng control port on 127.0.0.1; the core's TVX_RTPENGINE_SOCK points here
+      TVX_RTP_PORT_MIN: "29000"               # narrow test pool (~250 concurrent calls); widen for production
+      TVX_RTP_PORT_MAX: "30000"
+      TVX_RTP_LOG_LEVEL: "${TVX_RTP_LOG_LEVEL:-6}"   # 6=info; 7 for verbose media debug
+      TZ: "Asia/Omsk"
+    restart: always
+
+  postgres:
+    image: postgres:18
+    container_name: thundervox-postgres
+    profiles: ["provisioning"]
+    network_mode: host
+    # Host networking: the database is for the core and the server on this host only, so bind to loopback
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+    environment:
+      POSTGRES_DB: thundervox
+      POSTGRES_USER: thundervox              # schema owner; the server runs Flyway as this superuser (needs CREATEROLE)
+      POSTGRES_PASSWORD: "${TVX_DB_PASSWORD:-}"    # empty -> the image refuses to initialise, which is the right failure
+      TZ: "Asia/Omsk"
+    volumes:
+      # postgres:18 keeps PGDATA at /var/lib/postgresql/18/docker; the parent is what the image declares as the volume
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U thundervox -d thundervox"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: always
+
+  server:
+    image: ghcr.io/beiroun/thundervox-server:0.1.0
+    container_name: thundervox-server
+    profiles: ["provisioning"]
+    network_mode: host
+    environment:
+      TVX_DB_URL: "jdbc:postgresql://127.0.0.1:5432/thundervox"
+      TVX_DB_USER: "thundervox"
+      TVX_DB_PASSWORD: "${TVX_DB_PASSWORD:-}"
+      TVX_SIP_DB_PASSWORD: "${TVX_SIP_DB_PASSWORD:-}"   # role the core logs in with; the same value goes into local.cfg TVX_DB_URL
+      TVX_SERVER_BIND: "127.0.0.1"           # the console's nginx proxies /api to it
+      TVX_SERVER_PORT: "8080"
+      TVX_LOG_LEVEL: "${TVX_LOG_LEVEL:-INFO}"
+      TZ: "Asia/Omsk"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  web:
+    image: ghcr.io/beiroun/thundervox-web:0.1.0
+    container_name: thundervox-web
+    profiles: ["provisioning"]
+    network_mode: host                       # nginx on port 80, proxies /api to 127.0.0.1:8080
+    environment:
+      TZ: "Asia/Omsk"
+    depends_on:
+      - server
+    restart: always
+
+volumes:
+  postgres-data:
