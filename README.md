@@ -57,9 +57,14 @@ component repositories below.
   from pinned sources (Kamailio and rtpengine are built from source) and
   publishes it to GHCR on a tagged release. Only Docker Official Images are
   used as bases.
-- **The host keeps only this repository.** A `docker-compose.yml`, `.env` and
-  `local.cfg` — no component sources, no builds on the server. Updating a
-  component means bumping an image tag.
+- **The host keeps only this repository.** A `docker-compose.yml`, a `Caddyfile`,
+  `.env` and the core's `local.cfg` / `tls.cfg` — no component sources, no builds
+  on the server. Updating a component means bumping an image tag.
+- **One public name per face, one edge.** `sip.<domain>` is SIP,
+  `console.<domain>` the operator console, `server.<domain>` the provisioning
+  API. The only container on 80/443 is the edge proxy, which obtains and renews
+  every certificate itself; the console, the API and the database listen on
+  loopback. The SIP core uses the same certificate for SIPS on 5061.
 - **One host, Docker Compose, host networking.** Kubernetes comes with the
   second node, not before.
 - **Security by provisioning, not by file.** Credentials live in the database
@@ -69,15 +74,21 @@ component repositories below.
 
 ```
 deploy/
-  docker-compose.yml    core, rtpengine, postgres, server, web — pinned image tags, profiles
-  .env.example          host address, database passwords
-  RUNBOOK.md            bring-up, migration from the old layout, update, rollback, checks, backup
+  docker-compose.yml    core, rtpengine, postgres, server, web, edge — pinned image tags, profiles
+  Caddyfile             public names -> loopback services, automatic TLS
+  .env.example          host names, ACME address, host IP, database passwords
+  RUNBOOK.md            bring-up, TLS, migration from the old layout, update, rollback, checks, backup
 ```
 
 `docker compose up -d` runs the bare core (`core` + `rtpengine`, as tested on
 the stand); `docker compose --profile provisioning up -d` adds PostgreSQL, the
-server and the console once their images are published. The host keeps this
-directory only — see [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
+server, the console and the edge proxy. The profile `tls` brings up the edge
+alone, for a host where only the SIP core needs a certificate. The host keeps
+this directory only — see [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
+
+Certificates and private keys are written by the edge proxy into
+`deploy/edge-data/` on the host and are never committed: this repository
+contains the names, not the key material.
 
 ## Status
 

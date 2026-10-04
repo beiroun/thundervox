@@ -1,14 +1,24 @@
 # ThunderVox deployment runbook
 
-One host, Docker Compose, published images. The host keeps this directory only: `docker-compose.yml`, `.env`,
-`local.cfg`. Component sources are never cloned on the server and nothing is built there.
+One host, Docker Compose, published images. The host keeps this directory only: `docker-compose.yml`,
+`Caddyfile`, `.env`, `local.cfg`, `tls.cfg` and the `edge-data/` directory the edge proxy writes its
+certificates into. Component sources are never cloned on the server and nothing is built there.
 
 ## Prerequisites
 
 - Linux host with Docker Engine and the Compose plugin (`docker compose version`).
-- DNS name of the SIP service pointing at the host (devices register and dial by name; `TVX_SIP_DOMAIN`).
-- Firewall open to the internet: UDP+TCP 5060 (SIP), UDP 29000–30000 (RTP), TCP 80 (console). Everything else
-  stays on loopback.
+- DNS: an A record for each public name, all pointing at this host. The names are issued a certificate over an
+  HTTP challenge, so they must resolve **before** the first start of the edge container.
+
+  | Name | `.env` | Serves |
+  |---|---|---|
+  | `sip.<domain>` | `TVX_SIP_HOST`, and `TVX_SIP_DOMAIN` in `local.cfg` | SIP: devices register and dial by this name |
+  | `console.<domain>` | `TVX_CONSOLE_HOST` | operator console (and its own `/api` to the server) |
+  | `server.<domain>` | `TVX_SERVER_HOST` | provisioning API under its own name |
+
+- Firewall open to the internet: UDP+TCP 5060 (SIP), UDP 29000–30000 (RTP), TCP 5061 (SIPS, with `TVX_TLS`),
+  TCP 80 and 443 (edge proxy). Port 80 stays open even though everything redirects to HTTPS - the ACME
+  challenge needs it. Everything else stays on loopback: the database, the server API and the console's nginx.
 - If the GHCR packages are private: `docker login ghcr.io` with a token that has `read:packages`. Public packages
   pull anonymously.
 
@@ -17,15 +27,22 @@ One host, Docker Compose, published images. The host keeps this directory only: 
 ```bash
 git clone https://github.com/beiroun/thundervox.git /opt/thundervox
 cd /opt/thundervox/deploy
-cp .env.example .env            # fill TVX_PUBLIC_IP (and TVX_LOCAL_IP on a 1:1 NAT host)
+cp .env.example .env            # fill the host names, TVX_ACME_EMAIL and TVX_PUBLIC_IP (TVX_LOCAL_IP on 1:1 NAT)
 docker compose pull
-# the core's local.cfg template ships inside its image - one source, no copy in this repository
+# the core's config templates ship inside its image - one source, no copies in this repository
 docker compose run --rm --entrypoint cat core /etc/kamailio/local.cfg.example > local.cfg
-#   fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
+docker compose run --rm --entrypoint cat core /etc/kamailio/tls.cfg.example > tls.cfg
+#   in local.cfg: fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
+# the edge proxy runs as uid 1001 (the core's uid, so the core can read the SIP certificate) and needs its
+# data directory to belong to that uid
+mkdir -p edge-data && sudo chown -R 1001:1001 edge-data
 docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg   # config check: must end without "ERROR"
 docker compose up -d
 docker compose logs -f core | grep --line-buffered TVX
 ```
+
+`tls.cfg` is created even with TLS switched off: the core mounts it as a file, and a bind mount of a missing
+path would silently turn into a directory.
 
 Then the proof: register a softphone, register the intercom panel, place a call. Expected log lines are described
 in `thundervox-core/README.md` ("Test with Zoiper").
@@ -58,7 +75,55 @@ Arrives with core 0.7 and server/web 0.1. Order, once the images exist:
    `docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg`, then `docker compose up -d core`.
    From now on REGISTER without credentials gets `401`, unknown accounts cannot register.
 
-Day-to-day start of everything: `docker compose --profile provisioning up -d`.
+Day-to-day start of everything: `docker compose --profile provisioning up -d`. The edge proxy comes up with
+this profile and takes over the public names: `https://console.<domain>` is the console,
+`https://server.<domain>` the API. Nothing listens on a public port except the edge and the SIP core.
+
+## TLS
+
+The edge proxy (Caddy) obtains and renews every certificate itself over an ACME HTTP challenge and keeps them
+in `edge-data/`. There is no certbot, no cron job and no renewal hook to maintain. Private keys never leave the
+host - `edge-data/` is gitignored, and so are `.env`, `local.cfg` and `tls.cfg`.
+
+First start, and after any change of a name in `.env`:
+
+```bash
+docker compose --profile provisioning up -d edge
+docker compose logs edge | grep -iE "certificate|obtain|error"   # expect "certificate obtained successfully"
+curl -sI https://console.<domain> | head -3
+curl -s  https://server.<domain>/api/v1/info
+```
+
+A name that does not resolve to this host fails the challenge; Caddy then retries with a growing backoff, so
+fix the DNS record and `docker compose restart edge` instead of waiting.
+
+### SIP over TLS (`TVX_TLS`)
+
+The core reads the certificate the edge proxy already holds for `sip.<domain>`; plain 5060 keeps working, so
+panels whose firmware has no TLS are unaffected.
+
+```bash
+# 1. find the real path - it carries the ACME directory the certificate came from
+docker compose exec edge find /data/caddy/certificates -name '*.crt'
+# 2. put that path (with /data replaced by /tls, which is where the core mounts the same directory) into tls.cfg
+# 3. switch it on in local.cfg: #!define TVX_TLS      (requires TVX_SIP_DOMAIN - a certificate is issued for a
+#    name, never for an IP; without it the config check fails with a TVX_TLS_NEEDS_TVX_SIP_DOMAIN… token)
+docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg
+docker compose up -d core
+docker compose logs core | grep -i tls
+```
+
+Renewal: Caddy rewrites the files in place roughly 30 days before expiry, and the running core keeps the old
+certificate in memory until it is told to re-read `tls.cfg`. A daily reload on the host covers it - idempotent,
+and cheaper than discovering an expired certificate:
+
+```
+# /etc/cron.d/thundervox-tls-reload
+23 4 * * * root docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl tls.reload >/dev/null 2>&1
+```
+
+If a reload ever does not pick a renewed file up, `docker compose up -d --force-recreate core` always does -
+at the cost of the in-memory registrations (devices re-REGISTER within about ten seconds).
 
 ## Updating a component
 
@@ -92,8 +157,11 @@ docker compose logs --since 10m core | grep TVX                    # routing dec
 docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl ul.dump      # registrations
 docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl dlg.list     # live calls
 docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl rtpengine.show all
-curl -s http://127.0.0.1:8080/api/v1/system/health                 # server (provisioning profile)
-curl -s http://127.0.0.1/api/v1/info                               # console -> server through nginx
+curl -s http://127.0.0.1:8080/api/v1/system/health                 # server, directly on loopback
+curl -s http://127.0.0.1:8081/api/v1/info                          # console nginx -> server
+curl -s https://console.<domain>/api/v1/info                       # edge -> console nginx -> server
+curl -s https://server.<domain>/api/v1/info                        # edge -> server
+docker compose exec edge find /data/caddy/certificates -name '*.crt'   # which names hold a certificate
 ```
 
 SIP on the wire: `sngrep` on the host (`apt install sngrep`) shows every dialog; one call is one `grep <Call-ID>`
@@ -101,6 +169,10 @@ in the core log.
 
 ## Backup
 
-What matters on the host: `.env`, `local.cfg` and the `postgres-data` volume (accounts, HA1 hashes,
+What matters on the host: `.env`, `local.cfg`, `tls.cfg` and the `postgres-data` volume (accounts, HA1 hashes,
 registrations). `docker compose exec postgres pg_dump -U thundervox thundervox > thundervox-$(date +%F).sql`
 for a logical dump. Images are reproducible from the registry and need no backup.
+
+`edge-data/` is worth keeping too, though it is not critical: the certificates would be re-issued on a fresh
+host automatically. What a backup saves is the ACME account and a brush with the CA's rate limits when a host
+is rebuilt repeatedly.

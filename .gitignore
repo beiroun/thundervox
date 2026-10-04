@@ -9,12 +9,20 @@ users.cfg
 secrets.cfg
 *.secrets
 
+# site-local operational scripts: real ports and addresses of one host, kept out of a public repo
+deploy/private/
+private/
+
 # credentials / TLS material
 *.pem
 *.key
 *.crt
 *.p12
 *.jks
+# the edge proxy's certificate store and ACME account (deploy/edge-data) - private keys, never committed
+edge-data/
+# site-local TLS profiles of the core (paths of the files above)
+tls.cfg
 
 # intellij
 .idea/
