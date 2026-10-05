@@ -28,7 +28,7 @@
 
 services:
   core:
-    image: ghcr.io/beiroun/thundervox-core:0.7.0
+    image: ghcr.io/beiroun/thundervox-core:0.9.0
     container_name: thundervox-core
     network_mode: host
     volumes:
@@ -48,7 +48,7 @@ services:
     restart: always
 
   rtpengine:
-    image: ghcr.io/beiroun/thundervox-rtpengine:0.7.0
+    image: ghcr.io/beiroun/thundervox-rtpengine:0.9.0
     container_name: thundervox-rtpengine
     network_mode: host
     environment:
@@ -85,7 +85,7 @@ services:
     restart: always
 
   server:
-    image: ghcr.io/beiroun/thundervox-server:0.1.0
+    image: ghcr.io/beiroun/thundervox-server:0.3.0
     container_name: thundervox-server
     profiles: ["provisioning"]
     network_mode: host
