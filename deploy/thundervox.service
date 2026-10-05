@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
+# ThunderVox - the compose stack of this directory as one system service
+# ======================================================================
+# Install (see RUNBOOK.md "System service"): the unit is rendered with the real path of this directory, the
+# committed file carries the canonical /opt/thundervox/deploy.
+#
+#   systemctl start thundervox     config check of the core, then `docker compose up -d`
+#   systemctl reload thundervox    the same on a running system - after `git pull`, `docker compose pull` or an
+#                                  edit of .env / local.cfg; only changed services are recreated
+#   systemctl stop thundervox      `docker compose down`: containers removed, the postgres-data volume and every
+#                                  file in this directory stay
+#
+# Which services start is decided by COMPOSE_PROFILES in .env, not here - the unit and a manual `docker compose`
+# in this directory always see the same set.
+#
+# Containers keep `restart: always`, so Docker revives a crashed one by itself; the unit owns start/stop of the
+# whole set. `down` on stop is deliberate: a stopped-but-present container with `restart: always` would be
+# started again by the Docker daemon on the next boot even with the unit disabled.
+
+[Unit]
+Description=ThunderVox (SIP core, media, provisioning layer, edge proxy)
+Documentation=https://github.com/beiroun/thundervox/blob/release/deploy/RUNBOOK.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/thundervox/deploy
+# A typo in local.cfg fails the start here instead of leaving the core in a restart loop. --no-deps: the check
+# needs only the core image, not a running rtpengine.
+ExecStartPre=/usr/bin/docker compose run --rm --no-deps core -c -f /etc/kamailio/kamailio.cfg
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecReload=/usr/bin/docker compose run --rm --no-deps core -c -f /etc/kamailio/kamailio.cfg
+ExecReload=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+# The first start on a fresh host may pull every image
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

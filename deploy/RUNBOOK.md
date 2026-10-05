@@ -75,9 +75,36 @@ Arrives with core 0.7 and server/web 0.1. Order, once the images exist:
    `docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg`, then `docker compose up -d core`.
    From now on REGISTER without credentials gets `401`, unknown accounts cannot register.
 
-Day-to-day start of everything: `docker compose --profile provisioning up -d`. The edge proxy comes up with
-this profile and takes over the public names: `https://console.<domain>` is the console,
-`https://server.<domain>` the API. Nothing listens on a public port except the edge and the SIP core.
+Day-to-day start of everything: `COMPOSE_PROFILES=provisioning` in `.env`, then `docker compose up -d` (or the
+system service below). The edge proxy comes up with this profile and takes over the public names:
+`https://console.<domain>` is the console, `https://server.<domain>` the API. Nothing listens on a public port
+except the edge and the SIP core.
+
+## System service
+
+`thundervox.service` runs this directory as one unit: config check of the core, then `docker compose up -d`;
+stop is `docker compose down`. Which services start is `COMPOSE_PROFILES` in `.env` - the same set a manual
+`docker compose` here sees. The committed unit points at `/opt/thundervox/deploy`; installing renders it with the
+real path of the checkout:
+
+```bash
+cd /opt/thundervox/deploy               # wherever the umbrella repository is cloned
+sed "s#/opt/thundervox/deploy#$PWD#" thundervox.service > /etc/systemd/system/thundervox.service
+systemctl daemon-reload
+systemctl enable --now thundervox
+systemctl status thundervox             # "active (exited)" is right: the unit is a oneshot, the containers run
+```
+
+| Action | Command |
+|---|---|
+| start / stop the whole system | `systemctl start thundervox` / `systemctl stop thundervox` |
+| apply a `git pull`, pulled images, an edited `.env` or `local.cfg` | `systemctl reload thundervox` |
+| logs of one service | `docker compose logs -f <service>` (the unit itself logs only the compose calls: `journalctl -u thundervox`) |
+
+`stop` removes the containers, so their `docker compose logs` go with them; the `postgres-data` volume and every
+file in this directory stay. A crashed container is restarted by Docker itself (`restart: always`), the unit is
+not involved. Re-render the unit after a change of `thundervox.service` in the repository (same `sed`, then
+`systemctl daemon-reload`).
 
 ## TLS
 
@@ -139,6 +166,9 @@ docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg   # when the core 
 docker compose up -d <service>
 ```
 
+With the system service installed, the last two lines are `systemctl reload thundervox` - it runs the same check
+and recreates only what changed.
+
 Core and rtpengine always move together (same repository, same tag). A `kamailio.cfg` change ships as a new core
 tag; a `local.cfg` change is a config check plus `docker compose up -d core`.
 
@@ -169,8 +199,8 @@ in the core log.
 
 ## Backup
 
-What matters on the host: `.env`, `local.cfg`, `tls.cfg` and the `postgres-data` volume (accounts, HA1 hashes,
-registrations). `docker compose exec postgres pg_dump -U thundervox thundervox > thundervox-$(date +%F).sql`
+What matters on the host: `.env`, `local.cfg`, `tls.cfg` and the `postgres-data` volume (Docker name `thundervox_postgres-data`; accounts, HA1
+hashes, registrations). `docker compose exec postgres pg_dump -U thundervox thundervox > thundervox-$(date +%F).sql`
 for a logical dump. Images are reproducible from the registry and need no backup.
 
 `edge-data/` is worth keeping too, though it is not critical: the certificates would be re-issued on a fresh

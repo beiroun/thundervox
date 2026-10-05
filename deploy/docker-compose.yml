@@ -15,7 +15,8 @@
 # them. Only SIP, RTP and HTTP face the internet; the database, the server API and the rtpengine control socket
 # listen on loopback.
 #
-# Profiles:
+# Profiles - chosen by COMPOSE_PROFILES in .env, so a manual `docker compose up -d` and thundervox.service (the
+# system service, RUNBOOK.md) start the same set:
 #   (none)         core + rtpengine - the bare SIP core, as tested on the stand (TVX_PROVISIONING off)
 #   provisioning   + postgres + server + web + edge - the provisioning layer (accounts, auth, console)
 #   tls            edge alone - when only the SIP core needs a certificate (TVX_TLS without the console)
@@ -25,6 +26,10 @@
 #
 # Firewall: UDP+TCP 5060 (SIP), UDP 29000-30000 (RTP), TCP 5061 (SIPS, with TVX_TLS), TCP 80 + 443 (edge; 80
 # is required even for an HTTPS-only site - the ACME challenge and the redirect to HTTPS both use it).
+
+# Pinned project name. Without it Compose takes the directory name ("deploy"), and the database volume is named
+# after it: a checkout under another directory name would start Postgres on a new, empty volume.
+name: thundervox
 
 services:
   core:
