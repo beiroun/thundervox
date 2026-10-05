@@ -106,6 +106,15 @@ services:
       # UI on the server's name). Empty = no cross-site browser access.
       TVX_CORS_ORIGINS: "${TVX_CORS_ORIGINS:-}"
       TVX_LOG_LEVEL: "${TVX_LOG_LEVEL:-INFO}"
+      # Digest realm of every issued SIP password = the SIP name devices register to (the core's TVX_SIP_DOMAIN).
+      # Hashed into each stored HA1: a different name later makes every issued password useless.
+      TVX_SIP_REALM: "${TVX_SIP_HOST:-}"
+      # Console access: token signing key and the super administrator (empty -> the server refuses to start)
+      TVX_JWT_SECRET: "${TVX_JWT_SECRET:-}"
+      TVX_SUPERADMIN_LOGIN: "${TVX_SUPERADMIN_LOGIN:-}"
+      TVX_SUPERADMIN_PASSWORD: "${TVX_SUPERADMIN_PASSWORD:-}"
+      TVX_CONSOLE_TOKEN_TTL: "${TVX_CONSOLE_TOKEN_TTL:-PT8H}"
+      # Same zone as the core: the console compares the registration expiry the core writes with the server clock
       TZ: "Asia/Omsk"
     depends_on:
       postgres:

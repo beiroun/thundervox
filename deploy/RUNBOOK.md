@@ -63,17 +63,26 @@ The old clone can be deleted afterwards; the server does not need component sour
 
 ## Enabling the provisioning layer (profile `provisioning`)
 
-Arrives with core 0.7 and server/web 0.1. Order, once the images exist:
+Needs server 0.4, console 0.2 and core 0.10 (images pinned in `docker-compose.yml`). Order:
 
-1. In `.env` set `TVX_DB_PASSWORD` and `TVX_SIP_DB_PASSWORD` (long random values; they never leave this host).
-2. `docker compose --profile provisioning up -d postgres server` – the server runs the migrations and creates the
-   `tvx_sip` role. Check: `docker compose logs server | grep -i flyway`.
-3. `docker compose --profile provisioning up -d web` – console on port 80; `GET /api/v1/info` answers through nginx.
-4. In the console: create the site, the devices, issue passwords; enter them into the panels and softphones.
-5. In `local.cfg`: `#!define TVX_PROVISIONING` and `TVX_DB_URL` with the `tvx_sip` password (the template of
-   core 0.8 documents both; refresh it from the new image with the same `cat` command when upgrading);
-   `docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg`, then `docker compose up -d core`.
-   From now on REGISTER without credentials gets `401`, unknown accounts cannot register.
+1. In `.env`: `COMPOSE_PROFILES=provisioning`; `TVX_DB_PASSWORD` and `TVX_SIP_DB_PASSWORD` (`openssl rand -hex 24`
+   each - hex, because `TVX_SIP_DB_PASSWORD` also goes into `local.cfg`, where `!` would break the line);
+   `TVX_JWT_SECRET` (`openssl rand -hex 32`); `TVX_SUPERADMIN_LOGIN` and `TVX_SUPERADMIN_PASSWORD`. Both database
+   passwords are fixed by the first start - changing them later needs `ALTER ROLE` in the database as well.
+2. `docker compose up -d postgres server` – the server runs the migrations, creates the `tvx_sip` role and the
+   super administrator. Check: `docker compose logs server | grep -iE "flyway|super administrator"`.
+3. `docker compose up -d web edge` – `https://console.<domain>`: log in as the super administrator, add
+   administrators / readers if needed.
+4. In the console, **SIP numbers**: create a number for every panel and softphone (number and password are
+   generated unless typed), enter number, SIP domain and password into each device. Devices keep registering
+   without a password until step 5 - the core does not check yet.
+5. In `local.cfg` (refresh the template from the new image with the `cat` command above and carry the values
+   over): `#!define TVX_PROVISIONING` and `TVX_DB_URL` with the `tvx_sip` password; `TVX_SIP_DOMAIN` must equal
+   `TVX_SIP_HOST` of `.env` - it is the digest realm the passwords were hashed with. Then
+   `systemctl reload thundervox` (or the config check + `docker compose up -d core`). From now on REGISTER and
+   INVITE without valid credentials get `401` / `407`, and the console shows who is online.
+   Devices that registered before step 5 stay registered until their next re-REGISTER, which then has to
+   authenticate.
 
 Day-to-day start of everything: `COMPOSE_PROFILES=provisioning` in `.env`, then `docker compose up -d` (or the
 system service below). The edge proxy comes up with this profile and takes over the public names:
