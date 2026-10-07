@@ -1,5 +1,6 @@
 # secrets / site-local config — NEVER commit (repo is meant to go public)
 deployment/.env
+deployment/.deploy.env
 .env
 .env.local
 deployment/configuration/local.cfg
@@ -12,7 +13,6 @@ secrets.cfg
 # site-local operational scripts: real ports and addresses of one host, kept out of a public repo
 deploy/private/
 private/
-
 # credentials / TLS material
 *.pem
 *.key
