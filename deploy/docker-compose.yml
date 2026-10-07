@@ -36,16 +36,34 @@ services:
     image: ghcr.io/beiroun/thundervox-core:0.10.0
     container_name: thundervox-core
     network_mode: host
+    # Long syntax with create_host_path: false on every host path. The short form creates a missing source as an
+    # empty root-owned directory: a missing tls.cfg became a directory on the first host (the tls module then
+    # fails with "cannot make tmp file" once TVX_TLS is on), a missing edge-data a directory Caddy cannot write.
+    # Without host path creation a missing file fails `up`/`run` at once with "bind source path does not exist".
     volumes:
       # Only the site-local files are mounted; kamailio.cfg is part of the image. A missing local.cfg fails the
-      # start on purpose (include_file) instead of running with somebody else's defaults.
-      - ./local.cfg:/etc/kamailio/local.cfg:ro
-      # TLS profiles, read only when local.cfg defines TVX_TLS. The file has to exist either way: a bind mount
-      # of a missing path would silently become a directory.
-      - ./tls.cfg:/etc/kamailio/tls.cfg:ro
+      # start on purpose instead of running with somebody else's defaults.
+      - type: bind
+        source: ./local.cfg
+        target: /etc/kamailio/local.cfg
+        read_only: true
+        bind:
+          create_host_path: false
+      # TLS profiles, read only when local.cfg defines TVX_TLS. The file has to exist either way.
+      - type: bind
+        source: ./tls.cfg
+        target: /etc/kamailio/tls.cfg
+        read_only: true
+        bind:
+          create_host_path: false
       # Certificates obtained by the edge proxy. The core runs as uid 1001, the same uid the edge container is
       # given, because CertMagic keeps private keys at 0600 - a shared group would not be enough.
-      - ./edge-data:/tls:ro
+      - type: bind
+        source: ./edge-data
+        target: /tls
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       TZ: "Asia/Omsk"
     depends_on:
@@ -163,7 +181,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Certificates, keys and the ACME account. A bind mount on purpose: the directory is created and chowned
       # to 1001 by the runbook before the first start, which a named volume cannot express.
-      - ./edge-data:/data
+      - type: bind
+        source: ./edge-data
+        target: /data
+        bind:
+          create_host_path: false
     restart: always
 
 volumes:

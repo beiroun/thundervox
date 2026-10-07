@@ -29,20 +29,24 @@ git clone https://github.com/beiroun/thundervox.git /opt/thundervox
 cd /opt/thundervox/deploy
 cp .env.example .env            # fill the host names, TVX_ACME_EMAIL and TVX_PUBLIC_IP (TVX_LOCAL_IP on 1:1 NAT)
 docker compose pull
-# the core's config templates ship inside its image - one source, no copies in this repository
-docker compose run --rm --entrypoint cat core /etc/kamailio/local.cfg.example > local.cfg
-docker compose run --rm --entrypoint cat core /etc/kamailio/tls.cfg.example > tls.cfg
-#   in local.cfg: fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
-# the edge proxy runs as uid 1001 (the core's uid, so the core can read the SIP certificate) and needs its
-# data directory to belong to that uid
+# every host path the core mounts has to exist before the first `docker compose run core` - compose refuses to
+# start the container otherwise (create_host_path: false). The edge proxy runs as uid 1001 (the core's uid, so
+# the core can read the SIP certificate) and needs its data directory to belong to that uid
+touch local.cfg tls.cfg
 mkdir -p edge-data && sudo chown -R 1001:1001 edge-data
-docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg   # config check: must end without "ERROR"
+# the core's config templates ship inside its image - one source, no copies in this repository
+docker compose run --rm --no-deps --entrypoint cat core /etc/kamailio/local.cfg.example > local.cfg
+docker compose run --rm --no-deps --entrypoint cat core /etc/kamailio/tls.cfg.example > tls.cfg
+#   in local.cfg: fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
+docker compose run --rm --no-deps core -c -f /etc/kamailio/kamailio.cfg   # config check: must end without "ERROR"
 docker compose up -d
 docker compose logs -f core | grep --line-buffered TVX
 ```
 
-`tls.cfg` is created even with TLS switched off: the core mounts it as a file, and a bind mount of a missing
-path would silently turn into a directory.
+`tls.cfg` is created even with TLS switched off: the core mounts it as a file. Compose does not create missing
+host paths here, so a forgotten file stops `up` with "bind source path does not exist" instead of turning into
+an empty directory (that is how the first host got a `tls.cfg` directory and a core that died with "cannot make
+tmp file" once `TVX_TLS` was switched on).
 
 Then the proof: register a softphone, register the intercom panel, place a call. Expected log lines are described
 in `thundervox-core/README.md` ("Test with Zoiper").
@@ -237,6 +241,7 @@ Database migrations are forward-only: rolling the server back past a migration n
 
 ```bash
 docker compose ps
+test -f local.cfg -a -f tls.cfg || echo "local.cfg or tls.cfg is missing or is a directory"
 docker compose logs --since 10m core | grep TVX                    # routing decisions, one line per step
 docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl ul.dump      # registrations
 docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl dlg.list     # live calls
