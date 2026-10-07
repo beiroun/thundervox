@@ -114,6 +114,8 @@ services:
       TVX_SUPERADMIN_LOGIN: "${TVX_SUPERADMIN_LOGIN:-}"
       TVX_SUPERADMIN_PASSWORD: "${TVX_SUPERADMIN_PASSWORD:-}"
       TVX_CONSOLE_TOKEN_TTL: "${TVX_CONSOLE_TOKEN_TTL:-PT8H}"
+      # Shared secret of the operator's backend for /service/** (header X-SERVICE-TOKEN). Empty = service API off.
+      TVX_SERVICE_TOKEN: "${TVX_SERVICE_TOKEN:-}"
       # Same zone as the core: the console compares the registration expiry the core writes with the server clock
       TZ: "Asia/Omsk"
     depends_on:

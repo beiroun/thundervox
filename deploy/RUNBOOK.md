@@ -77,12 +77,50 @@ Needs server 0.4, console 0.2 and core 0.10 (images pinned in `docker-compose.ym
    generated unless typed), enter number, SIP domain and password into each device. Devices keep registering
    without a password until step 5 - the core does not check yet.
 5. In `local.cfg` (refresh the template from the new image with the `cat` command above and carry the values
-   over): `#!define TVX_PROVISIONING` and `TVX_DB_URL` with the `tvx_sip` password; `TVX_SIP_DOMAIN` must equal
-   `TVX_SIP_HOST` of `.env` - it is the digest realm the passwords were hashed with. Then
-   `systemctl reload thundervox` (or the config check + `docker compose up -d core`). From now on REGISTER and
-   INVITE without valid credentials get `401` / `407`, and the console shows who is online.
-   Devices that registered before step 5 stay registered until their next re-REGISTER, which then has to
-   authenticate.
+   over): `#!define TVX_PROVISIONING` (exactly one `#` - the template ships the line as `##!define`) and the
+   `TVX_DB_URL` substdef with the `tvx_sip` password; `TVX_SIP_DOMAIN` must equal `TVX_SIP_HOST` of `.env` - it
+   is the digest realm the passwords were hashed with. Then `systemctl reload thundervox` (or by hand: the config
+   check, then `docker compose up -d --force-recreate core`). From now on REGISTER and INVITE without valid
+   credentials get `401` / `407`, and the console shows who is online. Devices that registered before step 5
+   stay registered until their next re-REGISTER, which then has to authenticate.
+6. Prove that the **running** core has the switch - the config check only proves that the file parses:
+
+   ```bash
+   docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl core.ppdefines | grep TVX_      # TVX_PROVISIONING must be listed
+   docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl core.modules | grep -E "auth_db|db_postgres"
+   docker compose logs --since 5m core | grep -E "REGISTER ok|auth"    # one 401 round, then "REGISTER ok" per device
+   docker compose exec postgres psql -U thundervox -d thundervox -c "select username, received, expires from location"
+   ```
+
+   `TVX_PROVISIONING` missing from the list = the core runs without it: the define is misspelled or still
+   `##!define`, it sits in a file other than the mounted one (`docker inspect thundervox-core --format
+   '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'` shows which host file the core reads), or
+   the container was never recreated after the edit (a plain `docker compose up -d` does not do that).
+
+## Service API for the operator's backend
+
+The operator's backend (for Modus: tv-sip in modusclientapi) provisions SIP accounts itself through
+`https://server.<domain>/api/v1/service/...`, with the shared secret of `.env` in the `X-SERVICE-TOKEN` header
+(`TVX_SERVICE_TOKEN`, `openssl rand -hex 32`; empty = the service API is off, the console does not depend on it).
+Numbers are addressed by the endpoint's id in the operator's own system, the `external_id`: a panel by its device
+id (Modus: `ip:port`, which selects the video shown when it calls), an app client by the subscriber account
+(whom to wake with a push). The same id always gets the same number; a disabled number comes back with the next
+PUT. `kind` is `PANEL` or `CLIENT`.
+
+| Call | Meaning |
+|---|---|
+| `PUT /service/sip-accounts/{kind}/{external_id}`, body `{"name": "…", "rotate_password": false}` (both optional) | first call creates the number (generated password in the response), later calls return the existing account; `rotate_password: true` issues a new password |
+| `DELETE /service/sip-accounts/{kind}/{external_id}` | out of service: the number is blocked, not deleted, and stays bound to the id |
+| `GET /service/sip-accounts/{kind}/{external_id}/registration` | whether the endpoint is registered right now (the push gateway asks before waking a device) |
+
+```bash
+curl -s -X PUT -H "X-SERVICE-TOKEN: $TVX_SERVICE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"Маяковского 14, кв. 11"}' https://server.<domain>/api/v1/service/sip-accounts/CLIENT/1234567890
+```
+
+The response carries `username`, `realm` / `sip_domain` and - only on creation or rotation - `password`: exactly
+what goes into the app or the panel. Every change made this way is in the console's audit trail under the actor
+`operator-backend`.
 
 Day-to-day start of everything: `COMPOSE_PROFILES=provisioning` in `.env`, then `docker compose up -d` (or the
 system service below). The edge proxy comes up with this profile and takes over the public names:
@@ -107,8 +145,14 @@ systemctl status thundervox             # "active (exited)" is right: the unit i
 | Action | Command |
 |---|---|
 | start / stop the whole system | `systemctl start thundervox` / `systemctl stop thundervox` |
-| apply a `git pull`, pulled images, an edited `.env` or `local.cfg` | `systemctl reload thundervox` |
+| apply a `git pull`, pulled images, an edited `.env` or `local.cfg` | `systemctl reload thundervox` (recreates what changed, and the core every time) |
 | logs of one service | `docker compose logs -f <service>` (the unit itself logs only the compose calls: `journalctl -u thundervox`) |
+
+`reload` recreates the core container every time, even when nothing else changed: Compose recreates a container
+only when the service definition or the image changed, and an edited bind-mounted `local.cfg` is neither - without
+the forced recreation a switch flipped in `local.cfg` would never reach the running core (Kamailio reads its config
+at start only). With `TVX_PROVISIONING` the registrations survive it, they are in PostgreSQL; without it devices
+re-REGISTER within their own interval.
 
 `stop` removes the containers, so their `docker compose logs` go with them; the `postgres-data` volume and every
 file in this directory stay. A crashed container is restarted by Docker itself (`restart: always`), the unit is
@@ -175,11 +219,12 @@ docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg   # when the core 
 docker compose up -d <service>
 ```
 
-With the system service installed, the last two lines are `systemctl reload thundervox` - it runs the same check
-and recreates only what changed.
+With the system service installed, the last two lines are `systemctl reload thundervox` - it runs the same check,
+recreates what changed and always recreates the core (see "System service").
 
 Core and rtpengine always move together (same repository, same tag). A `kamailio.cfg` change ships as a new core
-tag; a `local.cfg` change is a config check plus `docker compose up -d core`.
+tag; a `local.cfg` change is a config check plus `docker compose up -d --force-recreate core` - a plain `up -d`
+sees no change in the service definition and leaves the running core, with its old config, alone.
 
 ## Rollback
 

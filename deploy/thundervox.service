@@ -7,7 +7,8 @@
 #
 #   systemctl start thundervox     config check of the core, then `docker compose up -d`
 #   systemctl reload thundervox    the same on a running system - after `git pull`, `docker compose pull` or an
-#                                  edit of .env / local.cfg; only changed services are recreated
+#                                  edit of .env / local.cfg; changed services are recreated, and the core is
+#                                  recreated every time (see below)
 #   systemctl stop thundervox      `docker compose down`: containers removed, the postgres-data volume and every
 #                                  file in this directory stay
 #
@@ -35,6 +36,11 @@ ExecStartPre=/usr/bin/docker compose run --rm --no-deps core -c -f /etc/kamailio
 ExecStart=/usr/bin/docker compose up -d --remove-orphans
 ExecReload=/usr/bin/docker compose run --rm --no-deps core -c -f /etc/kamailio/kamailio.cfg
 ExecReload=/usr/bin/docker compose up -d --remove-orphans
+# Compose recreates a container only when its service definition or image changed; an edited bind-mounted
+# local.cfg is neither, so without this line a switch flipped in local.cfg would never reach the running core.
+# Kamailio reads its config at start only. With TVX_PROVISIONING the registrations survive the recreation (they
+# are in PostgreSQL); without it devices re-REGISTER within their own interval.
+ExecReload=/usr/bin/docker compose up -d --no-deps --force-recreate core
 ExecStop=/usr/bin/docker compose down
 # The first start on a fresh host may pull every image
 TimeoutStartSec=600
