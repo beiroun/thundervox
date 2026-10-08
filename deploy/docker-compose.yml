@@ -33,7 +33,7 @@ name: thundervox
 
 services:
   core:
-    image: ghcr.io/beiroun/thundervox-core:0.10.0
+    image: ghcr.io/beiroun/thundervox-core:0.11.0
     container_name: thundervox-core
     network_mode: host
     # Long syntax with create_host_path: false on every host path. The short form creates a missing source as an
@@ -71,7 +71,7 @@ services:
     restart: always
 
   rtpengine:
-    image: ghcr.io/beiroun/thundervox-rtpengine:0.10.0
+    image: ghcr.io/beiroun/thundervox-rtpengine:0.11.0
     container_name: thundervox-rtpengine
     network_mode: host
     environment:
@@ -108,7 +108,7 @@ services:
     restart: always
 
   server:
-    image: ghcr.io/beiroun/thundervox-server:0.5.0
+    image: ghcr.io/beiroun/thundervox-server:0.6.0
     container_name: thundervox-server
     profiles: ["provisioning"]
     network_mode: host
@@ -132,8 +132,11 @@ services:
       TVX_SUPERADMIN_LOGIN: "${TVX_SUPERADMIN_LOGIN:-}"
       TVX_SUPERADMIN_PASSWORD: "${TVX_SUPERADMIN_PASSWORD:-}"
       TVX_CONSOLE_TOKEN_TTL: "${TVX_CONSOLE_TOKEN_TTL:-PT8H}"
-      # Shared secret of the operator's backend for /service/** (header X-SERVICE-TOKEN). Empty = service API off.
-      TVX_SERVICE_TOKEN: "${TVX_SERVICE_TOKEN:-}"
+      # Shared secret of the SIP core for /internal/** (header X-CORE-TOKEN); the same value is TVX_CORE_TOKEN in
+      # local.cfg. Empty = the core cannot ask for wake pushes. Service API tokens live in the database (console).
+      TVX_CORE_TOKEN: "${TVX_CORE_TOKEN:-}"
+      # Address the operator's backend reaches the API at, shown on the console's Integration page
+      TVX_PUBLIC_API_URL: "https://${TVX_SERVER_HOST:-server.example.com}/api/v1"
       # Same zone as the core: the console compares the registration expiry the core writes with the server clock
       TZ: "Asia/Omsk"
     depends_on:
@@ -142,7 +145,7 @@ services:
     restart: always
 
   web:
-    image: ghcr.io/beiroun/thundervox-web:0.6.0
+    image: ghcr.io/beiroun/thundervox-web:0.7.0
     container_name: thundervox-web
     profiles: ["provisioning"]
     network_mode: host                       # nginx on 127.0.0.1:8081 behind the edge, proxies /api to 127.0.0.1:8080

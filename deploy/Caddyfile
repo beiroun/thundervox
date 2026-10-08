@@ -40,6 +40,9 @@
 # client arriving here from the console's origin is a cross-site call - allow it on the server (TVX_CORS_ORIGINS).
 {$TVX_SERVER_HOST} {
 	import hardening
+	# The internal API is for the SIP core on loopback only (X-CORE-TOKEN): nothing from the internet reaches it
+	@internal path /api/v1/internal/*
+	respond @internal 404
 	reverse_proxy 127.0.0.1:8080
 }
 

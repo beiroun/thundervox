@@ -67,7 +67,7 @@ The old clone can be deleted afterwards; the server does not need component sour
 
 ## Enabling the provisioning layer (profile `provisioning`)
 
-Needs server 0.4, console 0.2 and core 0.10 (images pinned in `docker-compose.yml`). Order:
+Needs server 0.4, console 0.2 and core 0.10 (images pinned in `docker-compose.yml`); the Integration page (service tokens, wake push) needs server 0.6 / console 0.7 / core 0.11, see below. Order:
 
 1. In `.env`: `COMPOSE_PROFILES=provisioning`; `TVX_DB_PASSWORD` and `TVX_SIP_DB_PASSWORD` (`openssl rand -hex 24`
    each - hex, because `TVX_SIP_DB_PASSWORD` also goes into `local.cfg`, where `!` would break the line);
@@ -104,27 +104,53 @@ Needs server 0.4, console 0.2 and core 0.10 (images pinned in `docker-compose.ym
 ## Service API for the operator's backend
 
 The operator's backend (for Modus: tv-sip in modusclientapi) provisions SIP accounts itself through
-`https://server.<domain>/api/v1/service/...`, with the shared secret of `.env` in the `X-SERVICE-TOKEN` header
-(`TVX_SERVICE_TOKEN`, `openssl rand -hex 32`; empty = the service API is off, the console does not depend on it).
-Numbers are addressed by the endpoint's id in the operator's own system, the `external_id`: a panel by its device
-id (Modus: `ip:port`, which selects the video shown when it calls), an app client by the subscriber account
-(whom to wake with a push). The same id always gets the same number; a disabled number comes back with the next
-PUT. `kind` is `PANEL` or `CLIENT`.
+`https://server.<domain>/api/v1/service/...`. Access is by a **service token** the super administrator issues on
+the console's **Integration** page (shown once, stored as a hash, revocable; any number of named tokens), sent
+in the `X-SERVICE-TOKEN` header. The page also lists every call below with the public address filled in and a
+copy button. Numbers are addressed by the endpoint's id in the operator's own system, the `external_id`: a panel
+by its device id (Modus: the `host:port` of `controls/devices`, which selects the video shown when it calls), an
+app client by the subscriber account (whom to wake with a push). The same id always gets the same number; a
+disabled number comes back with the next PUT. `kind` is `PANEL` or `CLIENT`.
 
 | Call | Meaning |
 |---|---|
-| `PUT /service/sip-accounts/{kind}/{external_id}`, body `{"name": "…", "rotate_password": false}` (both optional) | first call creates the number (generated password in the response), later calls return the existing account; `rotate_password: true` issues a new password |
+| `PUT /service/sip-accounts/{kind}/{external_id}`, body `{"name": "…", "rotate_password": false}` (both optional) | first call creates the number (generated password in the response), later calls return the existing account without a password; `rotate_password: true` issues a new password |
+| `GET /service/sip-accounts/{kind}/{external_id}` | the number as it is - never a password; `410` when unknown |
 | `DELETE /service/sip-accounts/{kind}/{external_id}` | out of service: the number is blocked, not deleted, and stays bound to the id |
-| `GET /service/sip-accounts/{kind}/{external_id}/registration` | whether the endpoint is registered right now (the push gateway asks before waking a device) |
+| `GET /service/sip-accounts/{kind}/{external_id}/registration` | whether the endpoint is registered right now |
 
 ```bash
-curl -s -X PUT -H "X-SERVICE-TOKEN: $TVX_SERVICE_TOKEN" -H "Content-Type: application/json" \
+curl -s -X PUT -H "X-SERVICE-TOKEN: tvx_…" -H "Content-Type: application/json" \
   -d '{"name":"Маяковского 14, кв. 11"}' https://server.<domain>/api/v1/service/sip-accounts/CLIENT/1234567890
 ```
 
 The response carries `username`, `realm` / `sip_domain` and - only on creation or rotation - `password`: exactly
 what goes into the app or the panel. Every change made this way is in the console's audit trail under the actor
-`operator-backend`.
+`token:<name>`.
+
+## Wake push (the Integration page)
+
+A call to a subscriber whose phone is asleep is parked by the core (`TVX_PUSH_WAIT`), which asks the server on
+loopback to wake the callee; the server turns the numbers into the operator's ids, makes up the `call_id` (UUID)
+and posts the wake request to the operator's backend. Where it goes is **not** in any file on the host: the super
+administrator sets the URL, the auth header and its value, and the timeouts on the Integration page, and anyone
+with the administrator role can send a **test push** there and read the **delivery log** (outcome, HTTP status,
+duration, the backend's answer - kept for a week). The request body (contract v2) is shown on the page.
+
+To switch the core's side on:
+
+1. `.env`: `TVX_CORE_TOKEN` (`openssl rand -hex 32`), then `docker compose up -d server` - the server log says
+   `Internal API enabled`.
+2. `local.cfg`: the same value as `#!substdef "!TVX_CORE_TOKEN!…!g"` and `#!define TVX_PUSH_WAIT` (one `#`),
+   then `systemctl reload thundervox` (config check + recreate of the core). `TVX_PUSH_URL` / `TVX_PUSH_TOKEN`
+   of core 0.10 and earlier are gone - remove them from `local.cfg`.
+3. On the Integration page: URL and header of the operator's backend, **Test push** → the delivery log shows
+   `DELIVERED` and the backend's echo. Then enable the switch on the page.
+4. A live call to an unregistered subscriber: `docker compose logs core | grep "wake accepted"` shows the
+   server's answer with the `call_id`; the same call is a `LIVE` row in the delivery log.
+
+`https://server.<domain>/api/v1/internal/…` and the console's `/api/v1/internal/…` answer `404` by design: the
+internal API is reachable on loopback only, with the token.
 
 Day-to-day start of everything: `COMPOSE_PROFILES=provisioning` in `.env`, then `docker compose up -d` (or the
 system service below). The edge proxy comes up with this profile and takes over the public names:
@@ -230,6 +256,35 @@ Core and rtpengine always move together (same repository, same tag). A `kamailio
 tag; a `local.cfg` change is a config check plus `docker compose up -d --force-recreate core` - a plain `up -d`
 sees no change in the service definition and leaves the running core, with its old config, alone.
 
+**Server 0.6 / console 0.7 / core 0.11 (the Integration page).** `.env`: drop `TVX_SERVICE_TOKEN`, add
+`TVX_CORE_TOKEN`; the compose file passes `TVX_PUBLIC_API_URL` from `TVX_SERVER_HOST`. The service API refuses
+every call until the super administrator issues a token on the Integration page - do that before the operator's
+backend is switched to the new token. `local.cfg`: `TVX_PUSH_URL` / `TVX_PUSH_TOKEN` are replaced by
+`TVX_CORE_TOKEN` (see "Wake push"); with `TVX_PUSH_WAIT` off nothing else changes for the core.
+
+### Pushing from the laptop (`push.sh`)
+
+The same update without logging in by hand: `push.sh` uploads the deploy files over sftp and runs the
+steps above on the host - `docker compose pull`, then `systemctl reload thundervox` (changed containers are
+recreated, the core always), then `docker compose ps`. Where the host is and how to log in come from
+`deploy/.deploy.env` (gitignored; copy `.deploy.env.example` and fill `TVX_DEPLOY_TARGET`, `TVX_DEPLOY_PORT`,
+`TVX_DEPLOY_DIR` and `TVX_DEPLOY_KEY`). sftp runs in batch mode and cannot ask for a password, so the login is
+a key: `ssh-keygen -t ed25519 -f ~/.ssh/thundervox -N ''`, then `ssh-copy-id -i ~/.ssh/thundervox.pub -p <port>
+<user@host>` once (that asks the password), then `TVX_DEPLOY_KEY=~/.ssh/thundervox`. A password is possible
+instead (`TVX_DEPLOY_PASSWORD`, needs `sshpass` on the laptop), the key is cleaner.
+
+```bash
+deploy/push.sh                 # docker-compose.yml, Caddyfile, thundervox.service -> pull -> reload
+deploy/push.sh local.cfg       # one named file instead; also for .env / tls.cfg, on purpose only - the live
+                               # copies belong to the host and a stale laptop copy would overwrite them
+deploy/push.sh --restart       # stop + start of the whole stack instead of a reload: every call drops
+deploy/push.sh --dry-run       # show the sftp batch and the remote commands, change nothing
+```
+
+When `thundervox.service` is among the sent files the unit is re-rendered with the host's path and
+`systemctl daemon-reload` runs, as in "System service". The files still go through git as before - the script
+only replaces the `git pull` on the host with an upload of what is on the laptop, committed or not.
+
 ## Rollback
 
 Revert the tag in `docker-compose.yml` (or `git revert` the bump), `git pull` on the server,
@@ -250,6 +305,7 @@ curl -s http://127.0.0.1:8080/api/v1/system/health                 # server, dir
 curl -s http://127.0.0.1:8081/api/v1/info                          # console nginx -> server
 curl -s https://console.<domain>/api/v1/info                       # edge -> console nginx -> server
 curl -s https://server.<domain>/api/v1/info                        # edge -> server
+curl -s -o /dev/null -w '%{http_code}\n' https://server.<domain>/api/v1/internal/push/wake   # 404: closed on the edge
 docker compose exec edge find /data/caddy/certificates -name '*.crt'   # which names hold a certificate
 ```
 

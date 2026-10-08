@@ -1,6 +1,8 @@
 # secrets / site-local config — NEVER commit (repo is meant to go public)
 deployment/.env
-deployment/.deploy.env
+# where deploy/push.sh sends the files: the host's address and ssh port (template: deploy/.deploy.env.example)
+deploy/.deploy.env
+.deploy.env
 .env
 .env.local
 deployment/configuration/local.cfg
