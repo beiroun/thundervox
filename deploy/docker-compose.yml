@@ -142,7 +142,7 @@ services:
     restart: always
 
   web:
-    image: ghcr.io/beiroun/thundervox-web:0.5.0
+    image: ghcr.io/beiroun/thundervox-web:0.6.0
     container_name: thundervox-web
     profiles: ["provisioning"]
     network_mode: host                       # nginx on 127.0.0.1:8081 behind the edge, proxies /api to 127.0.0.1:8080
