@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
+# ThunderVox — site-local values and switches (template)
+# ======================================================
+# Copy to local.cfg and fill in for your server. local.cfg is gitignored and is
+# pulled into kamailio.cfg by "include_file" — never commit the filled-in copy.
+#
+# substdef performs a textual replace everywhere in the config, including inside
+# strings, so a value can appear both bare (listen/advertise) and inside JSON
+# (push body) with the same definition.
+
+# ---- Server address: at least one of the two below must be set. ----
+
+# SIP domain (preferred): the DNS name that resolves to this server. Devices
+# register to it and dial through it (sip:102@sip.example.com). When set, the
+# core works through it - advertised in Via/Record-Route and treated as "myself".
+#!substdef "!TVX_SIP_DOMAIN!sip.example.com!g"
+
+# Server public IP. Advertised instead of the domain when TVX_SIP_DOMAIN is not
+# set; otherwise only accepted as "myself" for devices that dial by raw IP.
+# Keep it equal to TVX_PUBLIC_IP in the deployment .env (thundervox/deploy/.env, which feeds rtpengine).
+#!substdef "!TVX_PUBLIC_IP!203.0.113.10!g"
+
+# Token the provisioning server expects from the core on its internal API
+# (X-CORE-TOKEN): the same value as TVX_CORE_TOKEN in the deployment .env. With
+# it set, the core reports call events to the server (call log, dashboard) and
+# may ask it to wake phones (TVX_PUSH_WAIT). Leave it out only when there is no
+# server. The push gateway itself (URL, auth header) is set on the console's
+# Integration page, not here.
+#!substdef "!TVX_CORE_TOKEN!replace-with-the-core-token-of-dot-env!g"
+
+# Where the provisioning server listens. The default is the compose layout
+# (host network, loopback); uncomment only when the server runs elsewhere.
+##!substdef "!TVX_SERVER_URL!http://127.0.0.1:8080/api/v1!g"
+
+# Provisioning database: the tvx_sip role the server's migration V3 creates, its
+# password = TVX_SIP_DB_PASSWORD of the deployment .env. Only used with
+# TVX_PROVISIONING. No '!' in the password - it delimits this substdef.
+#!substdef "!TVX_DB_URL!postgres://tvx_sip:replace-with-tvx-sip-password@127.0.0.1:5432/thundervox!g"
+
+
+# ---- Switches: uncomment to enable. Everything below is OFF when absent. ----
+
+# Accounts and registrations from the provisioning server: digest auth of
+# REGISTER and INVITE against its database (passwords issued in the console),
+# registrations stored there too. Requires TVX_SIP_DOMAIN (the digest realm -
+# must equal TVX_SIP_HOST of the .env the server hashes with) and TVX_DB_URL.
+# Switch it on only after every device got its password in the console: from
+# that moment a device without one can neither register nor call.
+##!define TVX_PROVISIONING
+
+# App clients (numbers 1...) are push-first: their INVITEs are parked for the
+# wake window and the provisioning server is asked to wake the phones (http on
+# loopback; the server delivers the push to the operator's backend configured
+# on the Integration page); the devices that register after the push are rung,
+# all of them in parallel. Requires TVX_CORE_TOKEN. Without it an offline callee
+# gets "480 Temporarily Unavailable" immediately and a registered one is simply
+# rung - the right mode while no push gateway is set.
+##!define TVX_PUSH_WAIT
+
+# Request-rate guard per source IP (pike): >32 requests / 2 s -> dropped.
+##!define TVX_ANTIFLOOD
+
+# Accept SIPS on 5061 in addition to plain 5060. Requires TVX_SIP_DOMAIN (a
+# certificate is issued for a name, not for an IP) and a filled-in tls.cfg next
+# to this file - its template ships in the image as
+# /etc/kamailio/tls.cfg.example. Plain 5060 keeps working for devices whose
+# firmware has no TLS.
+##!define TVX_TLS

@@ -32,11 +32,10 @@ docker compose pull
 # every host path the core mounts has to exist before the first `docker compose run core` - compose refuses to
 # start the container otherwise (create_host_path: false). The edge proxy runs as uid 1001 (the core's uid, so
 # the core can read the SIP certificate) and needs its data directory to belong to that uid
-touch local.cfg tls.cfg
 mkdir -p edge-data && sudo chown -R 1001:1001 edge-data
-# the core's config templates ship inside its image - one source, no copies in this repository
-docker compose run --rm --no-deps --entrypoint cat core /etc/kamailio/local.cfg.example > local.cfg
-docker compose run --rm --no-deps --entrypoint cat core /etc/kamailio/tls.cfg.example > tls.cfg
+# the core's site-local files start from the templates next to them (both gitignored once filled in)
+cp local.cfg.example local.cfg
+cp tls.cfg.example tls.cfg
 #   in local.cfg: fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
 docker compose run --rm --no-deps core -c -f /etc/kamailio/kamailio.cfg   # config check: must end without "ERROR"
 docker compose up -d
@@ -261,6 +260,17 @@ sees no change in the service definition and leaves the running core, with its o
 every call until the super administrator issues a token on the Integration page - do that before the operator's
 backend is switched to the new token. `local.cfg`: `TVX_PUSH_URL` / `TVX_PUSH_TOKEN` are replaced by
 `TVX_CORE_TOKEN` (see "Wake push"); with `TVX_PUSH_WAIT` off nothing else changes for the core.
+
+**Server 0.7 / console 0.9 / core 0.12 (journals, dashboard, forking).** The server adds the journal tables
+(migration `V7`) and starts sampling `location` every 10 s; nothing to configure, the three retention
+variables in `.env.example` are optional. The core now reports call events to the server whenever
+`TVX_CORE_TOKEN` is set in `local.cfg` (`http_client` loads with the token, not only with `TVX_PUSH_WAIT`), so
+set the token in `.env` and `local.cfg` together as before. Behaviour changes to know about: several devices may
+register one number and all of them ring; with `TVX_PUSH_WAIT` the app client numbers (`1…`) are always parked
+and woken, only devices that register after the push ring, and a second caller to a number that is being woken
+hears `486`; TCP contacts leave `location` when their connection dies. The console's registration status in
+the API changed shape (`online_since`, `last_online_at`, `last_offline_at` instead of `expires_at`,
+`last_seen_at`) - upgrade server and console together.
 
 ### Pushing from the laptop (`push.sh`)
 

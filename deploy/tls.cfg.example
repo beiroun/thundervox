@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: BUSL-1.1
+# Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
+# ThunderVox - TLS profiles for SIPS on 5061 (template)
+# =====================================================
+# Only read when TVX_TLS is defined in local.cfg. Copy to tls.cfg next to it in the deployment directory
+# (thundervox/deploy/) - it names site-local file paths and is gitignored like local.cfg.
+#
+# Why an external file and not modparam("tls", "certificate", ...): "tls.reload" (kamcmd) re-reads THIS file,
+# which is how a renewed certificate reaches a running core. A modparam value is fixed until restart, and a
+# restart drops the in-memory registrations - every device would have to re-REGISTER.
+#
+# The certificate is obtained by the edge proxy (Caddy) and lives in the shared tls volume, mounted read-only
+# at /tls. Caddy stores it per ACME directory, so the path carries the CA it came from - check the real one on
+# the host before filling this in:
+#   docker compose exec edge find /data/caddy/certificates -name '*.crt'
+# The core container reads the same volume, so the /data prefix above becomes /tls here.
+#
+# Kamailio's default method is TLSv1.0, which modern clients refuse - always set it explicitly.
+
+[server:default]
+method = TLSv1.2+
+certificate = /tls/caddy/certificates/acme-v02.api.letsencrypt.org-directory/sip.example.com/sip.example.com.crt
+private_key = /tls/caddy/certificates/acme-v02.api.letsencrypt.org-directory/sip.example.com/sip.example.com.key
+# Devices authenticate with SIP digest, not with client certificates: asking for one would lock out every panel.
+verify_certificate = no
+require_certificate = no
+
+# Outgoing TLS (the core as a client, e.g. a future SIP trunk): verify the peer against the system CA bundle.
+[client:default]
+method = TLSv1.2+
+ca_list = /etc/ssl/certs/ca-certificates.crt
+verify_certificate = yes
+require_certificate = no
