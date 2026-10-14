@@ -108,7 +108,7 @@ services:
     restart: always
 
   server:
-    image: ghcr.io/beiroun/thundervox-server:0.7.0
+    image: ghcr.io/beiroun/thundervox-server:0.7.1
     container_name: thundervox-server
     profiles: ["provisioning"]
     network_mode: host
