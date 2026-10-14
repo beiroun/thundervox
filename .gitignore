@@ -48,3 +48,5 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+# previous generation of a site-local file on the host, kept by deploy/push.sh before it replaces the file
+*.prev

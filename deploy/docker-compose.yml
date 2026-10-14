@@ -33,7 +33,7 @@ name: thundervox
 
 services:
   core:
-    image: ghcr.io/beiroun/thundervox-core:0.12.0
+    image: ghcr.io/beiroun/thundervox-core:0.12.1
     container_name: thundervox-core
     network_mode: host
     # Long syntax with create_host_path: false on every host path. The short form creates a missing source as an
@@ -71,7 +71,7 @@ services:
     restart: always
 
   rtpengine:
-    image: ghcr.io/beiroun/thundervox-rtpengine:0.12.0
+    image: ghcr.io/beiroun/thundervox-rtpengine:0.12.1
     container_name: thundervox-rtpengine
     network_mode: host
     environment:

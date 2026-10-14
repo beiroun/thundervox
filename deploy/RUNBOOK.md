@@ -284,16 +284,22 @@ a key: `ssh-keygen -t ed25519 -f ~/.ssh/thundervox -N ''`, then `ssh-copy-id -i 
 instead (`TVX_DEPLOY_PASSWORD`, needs `sshpass` on the laptop), the key is cleaner.
 
 ```bash
-deploy/push.sh                 # docker-compose.yml, Caddyfile, thundervox.service -> pull -> reload
-deploy/push.sh local.cfg       # one named file instead; also for .env / tls.cfg, on purpose only - the live
-                               # copies belong to the host and a stale laptop copy would overwrite them
+deploy/push.sh                 # docker-compose.yml, Caddyfile, thundervox.service + the site-local files that
+                               # exist on the laptop (.env, local.cfg, tls.cfg) -> pull -> reload
+deploy/push.sh local.cfg       # one named file instead (any file of this directory)
 deploy/push.sh --restart       # stop + start of the whole stack instead of a reload: every call drops
 deploy/push.sh --dry-run       # show the sftp batch and the remote commands, change nothing
 ```
 
+The site-local files are edited on the laptop and travel with every push; the host only runs them. Before one
+of them is replaced, the copy that was on the host is moved to `<file>.prev` (one generation): a wrong push is
+undone with `mv local.cfg.prev local.cfg && systemctl reload thundervox`. A site-local file missing on the laptop
+is not sent and nothing on the host is removed. The reload recreates the core, so a changed `local.cfg` takes
+effect at once (check with `kamcmd core.ppdefines`); a changed `.env` reaches the other containers the same way.
+
 When `thundervox.service` is among the sent files the unit is re-rendered with the host's path and
-`systemctl daemon-reload` runs, as in "System service". The files still go through git as before - the script
-only replaces the `git pull` on the host with an upload of what is on the laptop, committed or not.
+`systemctl daemon-reload` runs, as in "System service". The committed files still go through git as before - the
+script only replaces the `git pull` on the host with an upload of what is on the laptop, committed or not.
 
 ## Rollback
 

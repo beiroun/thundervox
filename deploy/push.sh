@@ -6,8 +6,9 @@
 # system service is reloaded (changed containers are recreated, the core always). Run from the laptop; the host
 # needs nothing beyond sshd, docker and the installed thundervox.service (RUNBOOK.md "System service").
 #
-#   deploy/push.sh                      send docker-compose.yml, Caddyfile, thundervox.service; pull; reload
-#   deploy/push.sh local.cfg            send one named file instead (any file of this directory, also .env / tls.cfg)
+#   deploy/push.sh                      send docker-compose.yml, Caddyfile, thundervox.service and the site-local
+#                                       files present here (.env, local.cfg, tls.cfg); pull; reload
+#   deploy/push.sh local.cfg            send one named file instead (any file of this directory)
 #   deploy/push.sh --restart            stop the whole stack and start it again instead of a reload - every call
 #                                       drops and Postgres restarts, so only when a reload cannot do it
 #   deploy/push.sh --dry-run            print what would be sent and run, touch nothing
@@ -22,8 +23,10 @@
 #                                                           ask for a password)
 #   TVX_DEPLOY_PASSWORD  password for the login             (fallback; needs sshpass on the laptop)
 #
-# Site-local files (.env, local.cfg, tls.cfg) are NOT in the default set: the live copies belong to the host, and
-# a stale laptop copy would silently overwrite them. Name them explicitly to push a local copy on purpose.
+# Site-local files (.env, local.cfg, tls.cfg) travel with the default set when they exist on the laptop: the
+# laptop is where they are edited, the host only runs them. Before such a file is replaced on the host, the copy
+# that was there is kept as <file>.prev (one generation), so a wrong push is undone with a rename. A site-local
+# file that is missing on the laptop is simply not sent - nothing on the host is ever removed by this script.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -61,12 +64,15 @@ remote_dir=${shell_dir:-${TVX_DEPLOY_DIR:-/opt/thundervox/deploy}}
 key=${shell_key:-${TVX_DEPLOY_KEY:-}}
 password=${shell_password:-${TVX_DEPLOY_PASSWORD:-}}
 
+# Files the host runs but never edits: replaced only from the laptop, the previous copy kept as <file>.prev
+site_local_files=(.env local.cfg tls.cfg)
+
 action=reload
 dry_run=0
 files=()
 
 usage() {
-  sed -n '4,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '4,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -121,8 +127,19 @@ login_hint() {
   echo "or a password: TVX_DEPLOY_PASSWORD=... (needs sshpass). sftp runs in batch mode and cannot ask for one." >&2
 }
 
+is_site_local() {
+  local candidate
+  for candidate in "${site_local_files[@]}"; do
+    [[ $1 == "$candidate" ]] && return 0
+  done
+  return 1
+}
+
 if [[ ${#files[@]} -eq 0 ]]; then
   files=(docker-compose.yml Caddyfile thundervox.service)
+  for file in "${site_local_files[@]}"; do
+    [[ -f "$deploy_dir/$file" ]] && files+=("$file")
+  done
 fi
 
 for file in "${files[@]}"; do
@@ -133,9 +150,15 @@ for file in "${files[@]}"; do
 done
 
 # Site-local files are never created by this script as directories or left half-written: sftp writes them whole.
+# A site-local file is first moved aside to <file>.prev (a "-" prefix makes the batch survive the first push,
+# when there is nothing to move); the previous .prev is dropped, one generation is enough to undo a mistake.
 sftp_batch=$(
   printf 'cd %s\n' "$remote_dir"
   for file in "${files[@]}"; do
+    if is_site_local "$file"; then
+      printf -- '-rm %s.prev\n' "$file"
+      printf -- '-rename %s %s.prev\n' "$file" "$file"
+    fi
     printf 'put %s\n' "$deploy_dir/$file"
   done
 )
@@ -146,7 +169,8 @@ for file in "${files[@]}"; do
 done
 
 # On the host: re-render the unit when it was sent (the committed file carries the canonical path), pull the
-# images the compose file now pins, then reload (or restart) the service and show what runs.
+# images the compose file now pins, then reload (or restart) the service and show what runs. A reload recreates
+# the core always, so a changed local.cfg takes effect; a changed .env reaches the other containers the same way.
 remote_script=$(
   cat <<EOF
 set -euo pipefail
