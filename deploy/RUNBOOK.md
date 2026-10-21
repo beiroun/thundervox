@@ -133,8 +133,9 @@ A call to a subscriber whose phone is asleep is parked by the core (`TVX_PUSH_WA
 loopback to wake the callee; the server turns the numbers into the operator's ids, makes up the `call_id` (UUID)
 and posts the wake request to the operator's backend. Where it goes is **not** in any file on the host: the super
 administrator sets the URL, the auth header and its value, and the timeouts on the Integration page, and anyone
-with the administrator role can send a **test push** there and read the **delivery log** (outcome, HTTP status,
-duration, the backend's answer - kept for a week). The request body (contract v2) is shown on the page.
+with the administrator role can send a **test push** there; what happened to every push (outcome, HTTP status,
+duration, the backend's answer - kept for a week) is on the console's **Events** page, category "Pushes". The
+request body (contract v2) is shown on the Integration page.
 
 To switch the core's side on:
 
@@ -143,10 +144,10 @@ To switch the core's side on:
 2. `local.cfg`: the same value as `#!substdef "!TVX_CORE_TOKEN!…!g"` and `#!define TVX_PUSH_WAIT` (one `#`),
    then `systemctl reload thundervox` (config check + recreate of the core). `TVX_PUSH_URL` / `TVX_PUSH_TOKEN`
    of core 0.10 and earlier are gone - remove them from `local.cfg`.
-3. On the Integration page: URL and header of the operator's backend, **Test push** → the delivery log shows
-   `DELIVERED` and the backend's echo. Then enable the switch on the page.
+3. On the Integration page: URL and header of the operator's backend, **Test push** → the result shows
+   `DELIVERED` and the backend's echo (and so does the Events page). Then enable the switch on the page.
 4. A live call to an unregistered subscriber: `docker compose logs core | grep "wake accepted"` shows the
-   server's answer with the `call_id`; the same call is a `LIVE` row in the delivery log.
+   server's answer with the `call_id`; on the Events page the call is a line with its wake push right after it.
 
 `https://server.<domain>/api/v1/internal/…` and the console's `/api/v1/internal/…` answer `404` by design: the
 internal API is reachable on loopback only, with the token.
@@ -271,6 +272,12 @@ and woken, only devices that register after the push ring, and a second caller t
 hears `486`; TCP contacts leave `location` when their connection dies. The console's registration status in
 the API changed shape (`online_since`, `last_online_at`, `last_offline_at` instead of `expires_at`,
 `last_seen_at`) - upgrade server and console together.
+
+**Server 0.10 / console 0.12 (the event log).** The server adds `service_call_log` (migration `V8`) and records
+every call to the service API there, refused ones included; the console's new **Events** page reads it together
+with registrations, calls and pushes, and the delivery log left the Integration page. Nothing to configure. The
+retention variables of the journals (`TVX_*_RETENTION` in `.env.example`) now reach the server container: until
+this release the compose file did not pass them, so a value set in `.env` had no effect.
 
 ### Pushing from the laptop (`push.sh`)
 

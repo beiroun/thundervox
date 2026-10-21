@@ -108,7 +108,7 @@ services:
     restart: always
 
   server:
-    image: ghcr.io/beiroun/thundervox-server:0.9.0
+    image: ghcr.io/beiroun/thundervox-server:0.10.0
     container_name: thundervox-server
     profiles: ["provisioning"]
     network_mode: host
@@ -138,6 +138,13 @@ services:
       TVX_CORE_TOKEN: "${TVX_CORE_TOKEN:-}"
       # Address the operator's backend reaches the API at, shown on the console's Integration page
       TVX_PUBLIC_API_URL: "https://${TVX_SERVER_HOST:-server.example.com}/api/v1"
+      # How long the journals of the dashboard and the event log are kept (ISO-8601). The defaults repeat the
+      # server's own: an empty value would reach the server as "" and fail its start, so a default is always set
+      TVX_PUSH_LOG_RETENTION: "${TVX_PUSH_LOG_RETENTION:-P7D}"
+      TVX_REGISTRATION_EVENT_RETENTION: "${TVX_REGISTRATION_EVENT_RETENTION:-P90D}"
+      TVX_CALL_LOG_RETENTION: "${TVX_CALL_LOG_RETENTION:-P90D}"
+      TVX_PRESENCE_SAMPLE_RETENTION: "${TVX_PRESENCE_SAMPLE_RETENTION:-P400D}"
+      TVX_SERVICE_CALL_LOG_RETENTION: "${TVX_SERVICE_CALL_LOG_RETENTION:-P30D}"
       # Same zone as the core: the console compares the registration expiry the core writes with the server clock
       TZ: "Asia/Omsk"
     depends_on:
@@ -146,7 +153,7 @@ services:
     restart: always
 
   web:
-    image: ghcr.io/beiroun/thundervox-web:0.11.0
+    image: ghcr.io/beiroun/thundervox-web:0.12.0
     container_name: thundervox-web
     profiles: ["provisioning"]
     network_mode: host                       # nginx on 127.0.0.1:8081 behind the edge, proxies /api to 127.0.0.1:8080
