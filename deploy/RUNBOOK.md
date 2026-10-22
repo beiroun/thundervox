@@ -279,6 +279,11 @@ with registrations, calls and pushes, and the delivery log left the Integration 
 retention variables of the journals (`TVX_*_RETENTION` in `.env.example`) now reach the server container: until
 this release the compose file did not pass them, so a value set in `.env` had no effect.
 
+**Server 0.11 / console 0.13 (quieter registrations).** A number goes offline only after 60 s missing from
+`location`, so a softphone that reconnects its TCP within a minute no longer leaves the journal; the event log
+shows registrations of panels only under "All" (app clients under "Registrations" and in the card of a call
+through a wake push), and a panel gone offline counts as a problem. Nothing to configure.
+
 ### Pushing from the laptop (`push.sh`)
 
 The same update without logging in by hand: `push.sh` uploads the deploy files over sftp and runs the
