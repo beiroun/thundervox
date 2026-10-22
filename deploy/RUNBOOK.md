@@ -284,6 +284,11 @@ this release the compose file did not pass them, so a value set in `.env` had no
 shows registrations of panels only under "All" (app clients under "Registrations" and in the card of a call
 through a wake push), and a panel gone offline counts as a problem. Nothing to configure.
 
+**Server 0.12 / console 0.14 (registrations of panels only).** Migration `V9` deletes the registration
+journal's lines of subscribers and numbers without an account and adds `call_log.callee_registered_at`; from then
+on only panels get journal lines (every number still keeps its state). The dashboard's "registrations" are
+panels coming online. Nothing to configure.
+
 ### Pushing from the laptop (`push.sh`)
 
 The same update without logging in by hand: `push.sh` uploads the deploy files over sftp and runs the
