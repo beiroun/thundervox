@@ -33,7 +33,7 @@ name: thundervox
 
 services:
   core:
-    image: ghcr.io/beiroun/thundervox-core:0.12.1
+    image: ghcr.io/beiroun/thundervox-core:0.12.2
     container_name: thundervox-core
     network_mode: host
     # Long syntax with create_host_path: false on every host path. The short form creates a missing source as an
@@ -71,7 +71,7 @@ services:
     restart: always
 
   rtpengine:
-    image: ghcr.io/beiroun/thundervox-rtpengine:0.12.1
+    image: ghcr.io/beiroun/thundervox-rtpengine:0.12.2
     container_name: thundervox-rtpengine
     network_mode: host
     environment:
@@ -86,7 +86,10 @@ services:
     restart: always
 
   postgres:
-    image: postgres:18
+    # Every external image is pinned by exact tag and digest (rule of 2026-10-22): `postgres:18` floated, and a
+    # pull fetched whatever "18" meant that day. A bump is a deliberate change of both, after checking that the
+    # tag resolves and the digest downloads (RUNBOOK, "Pinned versions"). 18.6-1.pgdg13+2 = what runs since 10-14
+    image: postgres:18.6-trixie@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
     container_name: thundervox-postgres
     profiles: ["provisioning"]
     network_mode: host
@@ -108,7 +111,7 @@ services:
     restart: always
 
   server:
-    image: ghcr.io/beiroun/thundervox-server:0.11.0
+    image: ghcr.io/beiroun/thundervox-server:0.11.1
     container_name: thundervox-server
     profiles: ["provisioning"]
     network_mode: host
@@ -153,7 +156,7 @@ services:
     restart: always
 
   web:
-    image: ghcr.io/beiroun/thundervox-web:0.13.0
+    image: ghcr.io/beiroun/thundervox-web:0.13.1
     container_name: thundervox-web
     profiles: ["provisioning"]
     network_mode: host                       # nginx on 127.0.0.1:8081 behind the edge, proxies /api to 127.0.0.1:8080
@@ -165,7 +168,7 @@ services:
 
   edge:
     # Caddy obtains and renews the certificates itself (ACME HTTP-01) - no certbot, no cron, no reload hook.
-    image: caddy:2.11.6
+    image: caddy:2.11.6@sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73
     container_name: thundervox-edge
     # Two ways in: with the provisioning layer (it serves the console and the API) and on its own, when only
     # the SIP core needs a certificate.
