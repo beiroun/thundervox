@@ -23,6 +23,8 @@ private/
 *.jks
 # the edge proxy's certificate store and ACME account (deploy/edge-data) - private keys, never committed
 edge-data/
+# site blocks other products of the host drop for the shared edge (deploy/sites/<product>.caddy) - host-local
+deploy/sites/
 # site-local TLS profiles of the core (paths of the files above)
 tls.cfg
 

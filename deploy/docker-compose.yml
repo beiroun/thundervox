@@ -200,6 +200,14 @@ services:
         target: /data
         bind:
           create_host_path: false
+      # Site blocks of other products on this host (Caddyfile: import sites/*.caddy), written there by their own
+      # deployment. Created empty when missing - unlike the files above, an empty directory is the right default
+      - type: bind
+        source: ./sites
+        target: /etc/caddy/sites
+        read_only: true
+        bind:
+          create_host_path: true
     restart: always
 
 volumes:

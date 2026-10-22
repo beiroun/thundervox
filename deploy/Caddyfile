@@ -52,3 +52,8 @@
 	import hardening
 	respond "ThunderVox SIP endpoint. SIP signalling is on UDP/TCP 5060 and TLS 5061, not HTTP." 404
 }
+
+# Other products on this host share this edge: each drops its site blocks into deploy/sites/<product>.caddy (written
+# by that product's deployment script on the host, never committed here) and reloads this container. An empty
+# directory imports nothing - an empty glob is not an error - so ThunderVox alone runs the same.
+import sites/*.caddy

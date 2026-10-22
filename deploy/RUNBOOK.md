@@ -235,6 +235,25 @@ and cheaper than discovering an expired certificate:
 If a reload ever does not pick a renewed file up, `docker compose up -d --force-recreate core` always does -
 at the cost of the in-memory registrations (devices re-REGISTER within about ten seconds).
 
+## Other products on this host (`deploy/sites/`)
+
+The edge owns ports 80 and 443, so another product on the same host does not run an edge of its own: it drops its
+site blocks into `deploy/sites/<product>.caddy` and reloads this edge. The Caddyfile imports `sites/*.caddy`; the
+directory is mounted read-only into the container and is gitignored - it is written on the host by the other
+product's deployment (Pathfinder: `deployment/cohost.sh` in `beiroun/pathfinder`). Empty, it imports nothing.
+
+```bash
+ls deploy/sites/                                                     # who else is served here
+docker compose exec edge caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose exec edge caddy reload   --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+The other product's certificates land in the same `edge-data/` and renew with ours. Its services listen on
+loopback ports of their own - ThunderVox keeps 5432, 8080, 8081 (and 4444, 2019 of rtpengine and Caddy). A
+broken file in `sites/` fails `caddy reload` and leaves the running config as it was; a broken file at a
+container start fails the edge, so `cohost.sh` validates before it reloads and puts the previous file back on
+failure.
+
 ## Updating a component
 
 1. Bump the image tag of the service in `docker-compose.yml` (component repositories publish
