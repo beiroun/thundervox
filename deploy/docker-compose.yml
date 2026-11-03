@@ -2,24 +2,22 @@
 # Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
 # ThunderVox - the whole system on one host
 # ==========================================
-# This directory is the only thing that lives on the server: this file, the Caddyfile, .env (from .env.example)
+# This directory holds the application only: this file, .env (from .env.example)
 # and the two core config files local.cfg / tls.cfg (their templates ship inside the core image:
 # docker compose run --rm --entrypoint cat core /etc/kamailio/local.cfg.example). No component sources, no
 # builds on the host - every service is a published image, pinned to the version it was tested with. Updating a
-# component = bump its tag here -> commit -> on the server `git pull && docker compose pull && docker compose up -d`.
+# component = publish its image, then update the exact tag here. Upload and activation are separate operations.
 #
-# Secrets never enter this repository: passwords and host names live in .env, TLS private keys are written by
-# the edge proxy into ./edge-data on the host. Both are gitignored; this file only names them.
+# Secrets and host-specific routing never enter this repository.
 #
 # Every service runs with network_mode: host: one host, no bridge NAT, 127.0.0.1 means the same thing for all of
 # them. Only SIP, RTP and HTTP face the internet; the database, the server API and the rtpengine control socket
 # listen on loopback.
 #
-# Profiles - chosen by COMPOSE_PROFILES in .env, so a manual `docker compose up -d` and thundervox.service (the
-# system service, RUNBOOK.md) start the same set:
+# Profiles are chosen by COMPOSE_PROFILES in the site-local .env:
 #   (none)         core + rtpengine - the bare SIP core, as tested on the stand (TVX_PROVISIONING off)
-#   provisioning   + postgres + server + web + edge - the provisioning layer (accounts, auth, console)
-#   tls            edge alone - when only the SIP core needs a certificate (TVX_TLS without the console)
+#   provisioning   + postgres + server + web - the provisioning layer (accounts, auth, console)
+# Certificate automation is external to the application profiles.
 #
 # Config check of the core before (re)starting it - fails fast on a typo in local.cfg:
 #   docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg
@@ -37,8 +35,7 @@ services:
     container_name: thundervox-core
     network_mode: host
     # Long syntax with create_host_path: false on every host path. The short form creates a missing source as an
-    # empty root-owned directory: a missing tls.cfg became a directory on the first host (the tls module then
-    # fails with "cannot make tmp file" once TVX_TLS is on), a missing edge-data a directory Caddy cannot write.
+    # empty root-owned directory, which cannot replace a configuration file or a certificate store.
     # Without host path creation a missing file fails `up`/`run` at once with "bind source path does not exist".
     volumes:
       # Only the site-local files are mounted; kamailio.cfg is part of the image. A missing local.cfg fails the
@@ -56,10 +53,9 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      # Certificates obtained by the edge proxy. The core runs as uid 1001, the same uid the edge container is
-      # given, because CertMagic keeps private keys at 0600 - a shared group would not be enough.
+      # The operator supplies a certificate directory readable by the core's runtime user.
       - type: bind
-        source: ./edge-data
+        source: "${TVX_TLS_DATA_DIR:?set TVX_TLS_DATA_DIR in deploy/.env}"
         target: /tls
         read_only: true
         bind:
@@ -121,7 +117,7 @@ services:
       TVX_DB_PASSWORD: "${TVX_DB_PASSWORD:-}"
       TVX_SIP_DB_PASSWORD: "${TVX_SIP_DB_PASSWORD:-}"   # role the core logs in with; the same value goes into local.cfg TVX_DB_URL
       TVX_SERVER_BIND: "127.0.0.1"           # reached by the console's nginx (/api) and by the edge proxy
-      TVX_SERVER_PORT: "8080"
+      TVX_SERVER_PORT: "${TVX_SERVER_PORT:?set TVX_SERVER_PORT in deploy/.env}"
       # Browser origins allowed to call the API cross-site. The console is same-origin through its own nginx,
       # so this is only for a browser on another name (console host calling the server host directly, Swagger
       # UI on the server's name). Empty = no cross-site browser access.
@@ -159,56 +155,21 @@ services:
     image: ghcr.io/beiroun/thundervox-web:0.14.0
     container_name: thundervox-web
     profiles: ["provisioning"]
-    network_mode: host                       # nginx on 127.0.0.1:8081 behind the edge, proxies /api to 127.0.0.1:8080
+    network_mode: host                       # listeners and upstreams are set in site-local console.conf
+    volumes:
+      - type: bind
+        source: ./console.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       TZ: "Asia/Omsk"
     depends_on:
       - server
     restart: always
 
-  edge:
-    # Caddy obtains and renews the certificates itself (ACME HTTP-01) - no certbot, no cron, no reload hook.
-    image: caddy:2.11.6@sha256:3422ce6de165df66534f9b9ba50efaf457114ec961763cc52f5dbdaac2972d73
-    container_name: thundervox-edge
-    # Two ways in: with the provisioning layer (it serves the console and the API) and on its own, when only
-    # the SIP core needs a certificate.
-    profiles: ["provisioning", "tls"]
-    network_mode: host
-    # The core reads the SIP certificate this container writes, and CertMagic keeps private keys at 0600, so
-    # both have to be the same uid - 1001 is pinned in the core image for exactly this reason.
-    user: "1001:1001"
-    cap_add:
-      # The image's binary carries cap_net_bind_service, but a non-root uid still has to be granted it to
-      # listen on 80 and 443.
-      - NET_BIND_SERVICE
-    environment:
-      # Site names; the Caddyfile substitutes them into its site addresses at parse time
-      TVX_CONSOLE_HOST: "${TVX_CONSOLE_HOST:?set TVX_CONSOLE_HOST in deploy/.env}"
-      TVX_SERVER_HOST: "${TVX_SERVER_HOST:?set TVX_SERVER_HOST in deploy/.env}"
-      TVX_SIP_HOST: "${TVX_SIP_HOST:?set TVX_SIP_HOST in deploy/.env}"
-      TVX_ACME_EMAIL: "${TVX_ACME_EMAIL:?set TVX_ACME_EMAIL in deploy/.env}"
-      # Keeps Caddy's autosaved config inside the same mounted directory, so the container needs one writable
-      # path and not two
-      XDG_CONFIG_HOME: "/data/config"
-      TZ: "Asia/Omsk"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Certificates, keys and the ACME account. A bind mount on purpose: the directory is created and chowned
-      # to 1001 by the runbook before the first start, which a named volume cannot express.
-      - type: bind
-        source: ./edge-data
-        target: /data
-        bind:
-          create_host_path: false
-      # Site blocks of other products on this host (Caddyfile: import sites/*.caddy), written there by their own
-      # deployment. Created empty when missing - unlike the files above, an empty directory is the right default
-      - type: bind
-        source: ./sites
-        target: /etc/caddy/sites
-        read_only: true
-        bind:
-          create_host_path: true
-    restart: always
-
 volumes:
   postgres-data:
+    external: true
+    name: "${TVX_DB_VOLUME:?set TVX_DB_VOLUME to the existing database volume in deploy/.env}"

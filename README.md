@@ -57,13 +57,13 @@ component repositories below.
   from pinned sources (Kamailio and rtpengine are built from source) and
   publishes it to GHCR on a tagged release. Only Docker Official Images are
   used as bases.
-- **The host keeps only this repository.** A `docker-compose.yml`, a `Caddyfile`,
-  `.env` and the core's `local.cfg` / `tls.cfg` — no component sources, no builds
+- **The application directory keeps only deployment files.** A `docker-compose.yml`,
+  `console.conf`, `.env` and the core's `local.cfg` / `tls.cfg` – no component sources, no builds
   on the server. Updating a component means bumping an image tag.
 - **One public name per face, one edge.** `sip.<domain>` is SIP,
   `console.<domain>` the operator console, `server.<domain>` the provisioning
-  API. The only container on 80/443 is the edge proxy, which obtains and renews
-  every certificate itself; the console, the API and the database listen on
+  API. Public routing and certificate automation are configured by the operator;
+  the console, the API and the database listen on
   loopback. The SIP core uses the same certificate for SIPS on 5061.
 - **One host, Docker Compose, host networking.** Kubernetes comes with the
   second node, not before.
@@ -74,21 +74,21 @@ component repositories below.
 
 ```
 deploy/
-  docker-compose.yml    core, rtpengine, postgres, server, web, edge — pinned image tags, profiles
-  Caddyfile             public names -> loopback services, automatic TLS
-  .env.example          host names, ACME address, host IP, database passwords
-  RUNBOOK.md            bring-up, TLS, migration from the old layout, update, rollback, checks, backup
+  docker-compose.yml    core, rtpengine, postgres, server, web – no edge proxy
+  console.conf.example  portable nginx example; the filled-in console.conf is ignored
+  .env.example          host names, host IP, database passwords
+  RUNBOOK.md            portable configuration and upload reference
 ```
 
 `docker compose up -d` runs the bare core (`core` + `rtpengine`, as tested on
 the stand); `docker compose --profile provisioning up -d` adds PostgreSQL, the
-server, the console and the edge proxy. The profile `tls` brings up the edge
-alone, for a host where only the SIP core needs a certificate. The host keeps
-this directory only — see [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
+server and the console. Public routing, certificate automation and host lifecycle
+are operator-managed and not included here. See [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).
 
-Certificates and private keys are written by the edge proxy into
-`deploy/edge-data/` on the host and are never committed: this repository
-contains the names, not the key material.
+Real listeners, certificate paths and the existing database volume name are
+configured in ignored `.env` and site-local files. Examples are illustrative,
+not production settings. `deploy/push.sh` uploads and validates only; activation
+is a separate operation under the operator's private deployment procedure.
 
 ## Status
 

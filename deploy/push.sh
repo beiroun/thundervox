@@ -2,15 +2,12 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
 #
-# Pushes the deploy files of this directory to the host over sftp and applies them: images are pulled and the
-# system service is reloaded (changed containers are recreated, the core always). Run from the laptop; the host
-# needs nothing beyond sshd, docker and the installed thundervox.service (RUNBOOK.md "System service").
+# Uploads application files and validates Compose without applying the deployment.
+# Units exist only on the host. Image pulls, daemon-reload and service actions are manual.
 #
-#   deploy/push.sh                      send docker-compose.yml, Caddyfile, thundervox.service and the site-local
-#                                       files present here (.env, local.cfg, tls.cfg); pull; reload
+#   deploy/push.sh                      send docker-compose.yml and console.conf; validate only
 #   deploy/push.sh local.cfg            send one named file instead (any file of this directory)
-#   deploy/push.sh --restart            stop the whole stack and start it again instead of a reload - every call
-#                                       drops and Postgres restarts, so only when a reload cannot do it
+#   Site-local files are uploaded only when named explicitly.
 #   deploy/push.sh --dry-run            print what would be sent and run, touch nothing
 #
 # Where the host is and how to log in come from deploy/.deploy.env (gitignored - the real address, port and key
@@ -23,21 +20,20 @@
 #                                                           ask for a password)
 #   TVX_DEPLOY_PASSWORD  password for the login             (fallback; needs sshpass on the laptop)
 #
-# Site-local files (.env, local.cfg, tls.cfg) travel with the default set when they exist on the laptop: the
-# laptop is where they are edited, the host only runs them. Before such a file is replaced on the host, the copy
+# Site-local files (.env, local.cfg, tls.cfg) are never in the default set. Before one is replaced on the host, the copy
 # that was there is kept as <file>.prev (one generation), so a wrong push is undone with a rename. A site-local
 # file that is missing on the laptop is simply not sent - nothing on the host is ever removed by this script.
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 
-# The deploy directory is the script's own or the nearest parent that holds the compose file and the unit: a
+# The deploy directory is the script's own or the nearest parent with compose and console.conf: a
 # copy (or symlink) of this script kept in deploy/private next to .deploy.env - gitignored, a natural place for
 # the host's address - finds the files one level up instead of failing on its own directory.
 deploy_dir=$script_dir
-while [[ ! -f "$deploy_dir/docker-compose.yml" || ! -f "$deploy_dir/thundervox.service" ]]; do
+while [[ ! -f "$deploy_dir/docker-compose.yml" || ! -f "$deploy_dir/console.conf" ]]; do
   if [[ $deploy_dir == / ]]; then
-    echo "no deploy directory (docker-compose.yml + thundervox.service) at or above $script_dir" >&2
+    echo "no deploy directory (docker-compose.yml + console.conf) at or above $script_dir" >&2
     exit 1
   fi
   deploy_dir=$(dirname "$deploy_dir")
@@ -67,7 +63,6 @@ password=${shell_password:-${TVX_DEPLOY_PASSWORD:-}}
 # Files the host runs but never edits: replaced only from the laptop, the previous copy kept as <file>.prev
 site_local_files=(.env local.cfg tls.cfg)
 
-action=reload
 dry_run=0
 files=()
 
@@ -78,7 +73,7 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --restart) action=restart ;;
+    --restart) echo "service actions are manual; see RUNBOOK.md" >&2; exit 2 ;;
     --dry-run) dry_run=1 ;;
     -h | --help) usage ;;
     -*) echo "unknown option: $1" >&2; usage ;;
@@ -136,10 +131,7 @@ is_site_local() {
 }
 
 if [[ ${#files[@]} -eq 0 ]]; then
-  files=(docker-compose.yml Caddyfile thundervox.service)
-  for file in "${site_local_files[@]}"; do
-    [[ -f "$deploy_dir/$file" ]] && files+=("$file")
-  done
+  files=(docker-compose.yml console.conf)
 fi
 
 for file in "${files[@]}"; do
@@ -163,26 +155,13 @@ sftp_batch=$(
   done
 )
 
-unit_sent=0
-for file in "${files[@]}"; do
-  [[ $file == thundervox.service ]] && unit_sent=1
-done
-
-# On the host: re-render the unit when it was sent (the committed file carries the canonical path), pull the
-# images the compose file now pins, then reload (or restart) the service and show what runs. A reload recreates
-# the core always, so a changed local.cfg takes effect; a changed .env reaches the other containers the same way.
+# Validation never prints the rendered configuration, which contains secrets.
 remote_script=$(
   cat <<EOF
 set -euo pipefail
 cd '$remote_dir'
-if [[ $unit_sent -eq 1 ]]; then
-  sed "s#/opt/thundervox/deploy#\$PWD#" thundervox.service > /etc/systemd/system/thundervox.service
-  systemctl daemon-reload
-  echo "unit re-rendered for \$PWD"
-fi
-docker compose pull --quiet
-systemctl $action thundervox
-docker compose ps
+docker compose -p thundervox -f docker-compose.yml config --quiet
+echo 'Files uploaded and Compose validated. Activation is a separate operator-controlled step.'
 EOF
 )
 
@@ -191,7 +170,7 @@ login_how="ssh agent / default keys"
 [[ -n $password ]] && login_how="password via sshpass"
 echo "target: $target (port $port, $login_how), dir: $remote_dir"
 echo "files:  ${files[*]}"
-echo "then:   docker compose pull; systemctl $action thundervox"
+echo "then:   validate only; no pulls or service actions"
 
 if [[ $dry_run -eq 1 ]]; then
   echo

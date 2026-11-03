@@ -29,9 +29,9 @@
 # Integration page, not here.
 #!substdef "!TVX_CORE_TOKEN!replace-with-the-core-token-of-dot-env!g"
 
-# Where the provisioning server listens. The default is the compose layout
-# (host network, loopback); uncomment only when the server runs elsewhere.
-##!substdef "!TVX_SERVER_URL!http://127.0.0.1:8080/api/v1!g"
+# Match the API listener selected by TVX_SERVER_PORT in the site-local .env.
+# This example uses the image's default port, not any particular host's listener.
+#!substdef "!TVX_SERVER_URL!http://127.0.0.1:8080/api/v1!g"
 
 # Provisioning database: the tvx_sip role the server's migration V3 creates, its
 # password = TVX_SIP_DB_PASSWORD of the deployment .env. Only used with

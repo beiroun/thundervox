@@ -27,6 +27,7 @@ edge-data/
 deploy/sites/
 # site-local TLS profiles of the core (paths of the files above)
 tls.cfg
+deploy/console.conf
 
 # intellij
 .idea/

@@ -1,113 +1,41 @@
 # ThunderVox deployment runbook
 
-One host, Docker Compose, published images. The host keeps this directory only: `docker-compose.yml`,
-`Caddyfile`, `.env`, `local.cfg`, `tls.cfg` and the `edge-data/` directory the edge proxy writes its
-certificates into. Component sources are never cloned on the server and nothing is built there.
+## Portable configuration reference
 
-## Prerequisites
+This public document describes the application contract, not any production
+host. Server coordinates, routing, service-manager units and operating procedures
+are maintained privately by the operator.
 
-- Linux host with Docker Engine and the Compose plugin (`docker compose version`).
-- DNS: an A record for each public name, all pointing at this host. The names are issued a certificate over an
-  HTTP challenge, so they must resolve **before** the first start of the edge container.
+- Copy `.env.example` to ignored `.env` and configure the site. Example values
+  must not replace an existing installation's settings or credentials.
+- Set `TVX_TLS_DATA_DIR` to the existing certificate directory, `TVX_DB_VOLUME`
+  to the existing external database volume and `TVX_SERVER_PORT` to the API listener.
+  A new installation must provision its external volume before starting PostgreSQL.
+- Copy `console.conf.example` to ignored `console.conf`; align its listener and
+  API upstream with the site configuration. Keep the internal API blocked.
+- Copy and configure `local.cfg.example` and `tls.cfg.example` in their ignored
+  counterparts. `TVX_SERVER_URL` in local.cfg must match the selected API listener.
+- Real certificate paths, private keys and credentials never enter Git.
 
-  | Name | `.env` | Serves |
-  |---|---|---|
-  | `sip.<domain>` | `TVX_SIP_HOST`, and `TVX_SIP_DOMAIN` in `local.cfg` | SIP: devices register and dial by this name |
-  | `console.<domain>` | `TVX_CONSOLE_HOST` | operator console (and its own `/api` to the server) |
-  | `server.<domain>` | `TVX_SERVER_HOST` | provisioning API under its own name |
+Validate from this directory with
+`docker compose -p thundervox -f docker-compose.yml config --quiet`.
+Do not print the rendered configuration because it contains resolved secrets.
 
-- Firewall open to the internet: UDP+TCP 5060 (SIP), UDP 29000–30000 (RTP), TCP 5061 (SIPS, with `TVX_TLS`),
-  TCP 80 and 443 (edge proxy). Port 80 stays open even though everything redirects to HTTPS - the ACME
-  challenge needs it. Everything else stays on loopback: the database, the server API and the console's nginx.
-- If the GHCR packages are private: `docker login ghcr.io` with a token that has `read:packages`. Public packages
-  pull anonymously.
-
-## First bring-up (bare core, no provisioning)
-
-```bash
-git clone https://github.com/beiroun/thundervox.git /opt/thundervox
-cd /opt/thundervox/deploy
-cp .env.example .env            # fill the host names, TVX_ACME_EMAIL and TVX_PUBLIC_IP (TVX_LOCAL_IP on 1:1 NAT)
-docker compose pull
-# every host path the core mounts has to exist before the first `docker compose run core` - compose refuses to
-# start the container otherwise (create_host_path: false). The edge proxy runs as uid 1001 (the core's uid, so
-# the core can read the SIP certificate) and needs its data directory to belong to that uid
-mkdir -p edge-data && sudo chown -R 1001:1001 edge-data
-# the core's site-local files start from the templates next to them (both gitignored once filled in)
-cp local.cfg.example local.cfg
-cp tls.cfg.example tls.cfg
-#   in local.cfg: fill TVX_SIP_DOMAIN / TVX_PUBLIC_IP; leave the switches off for the first run
-docker compose run --rm --no-deps core -c -f /etc/kamailio/kamailio.cfg   # config check: must end without "ERROR"
-docker compose up -d
-docker compose logs -f core | grep --line-buffered TVX
-```
-
-`tls.cfg` is created even with TLS switched off: the core mounts it as a file. Compose does not create missing
-host paths here, so a forgotten file stops `up` with "bind source path does not exist" instead of turning into
-an empty directory (that is how the first host got a `tls.cfg` directory and a core that died with "cannot make
-tmp file" once `TVX_TLS` was switched on).
-
-Then the proof: register a softphone, register the intercom panel, place a call. Expected log lines are described
-in `thundervox-core/README.md` ("Test with Zoiper").
-
-### Moving from `thundervox-core/deployment` (hosts set up before 0.7.0, when the core repository still carried its own compose)
-
-The core used to run from a clone of `thundervox-core`. The configuration files are the same; only their home
-changes.
-
-```bash
-cd /path/to/thundervox-core/deployment && docker compose down
-cp configuration/local.cfg /opt/thundervox/deploy/local.cfg
-# TVX_PUBLIC_IP from the old .env goes into /opt/thundervox/deploy/.env
-cd /opt/thundervox/deploy && docker compose pull && docker compose up -d
-```
-
-The old clone can be deleted afterwards; the server does not need component sources.
-
-## Enabling the provisioning layer (profile `provisioning`)
-
-Needs server 0.4, console 0.2 and core 0.10 (images pinned in `docker-compose.yml`); the Integration page (service tokens, wake push) needs server 0.6 / console 0.7 / core 0.11, see below. Order:
-
-1. In `.env`: `COMPOSE_PROFILES=provisioning`; `TVX_DB_PASSWORD` and `TVX_SIP_DB_PASSWORD` (`openssl rand -hex 24`
-   each - hex, because `TVX_SIP_DB_PASSWORD` also goes into `local.cfg`, where `!` would break the line);
-   `TVX_JWT_SECRET` (`openssl rand -hex 32`); `TVX_SUPERADMIN_LOGIN` and `TVX_SUPERADMIN_PASSWORD`. Both database
-   passwords are fixed by the first start - changing them later needs `ALTER ROLE` in the database as well.
-2. `docker compose up -d postgres server` – the server runs the migrations, creates the `tvx_sip` role and the
-   super administrator. Check: `docker compose logs server | grep -iE "flyway|super administrator"`.
-3. `docker compose up -d web edge` – `https://console.<domain>`: log in as the super administrator, add
-   administrators / readers if needed.
-4. In the console, **SIP numbers**: create a number for every panel and softphone (number and password are
-   generated unless typed), enter number, SIP domain and password into each device. Devices keep registering
-   without a password until step 5 - the core does not check yet.
-5. In `local.cfg` (refresh the template from the new image with the `cat` command above and carry the values
-   over): `#!define TVX_PROVISIONING` (exactly one `#` - the template ships the line as `##!define`) and the
-   `TVX_DB_URL` substdef with the `tvx_sip` password; `TVX_SIP_DOMAIN` must equal `TVX_SIP_HOST` of `.env` - it
-   is the digest realm the passwords were hashed with. Then `systemctl reload thundervox` (or by hand: the config
-   check, then `docker compose up -d --force-recreate core`). From now on REGISTER and INVITE without valid
-   credentials get `401` / `407`, and the console shows who is online. Devices that registered before step 5
-   stay registered until their next re-REGISTER, which then has to authenticate.
-6. Prove that the **running** core has the switch - the config check only proves that the file parses:
-
-   ```bash
-   docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl core.ppdefines | grep TVX_      # TVX_PROVISIONING must be listed
-   docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl core.modules | grep -E "auth_db|db_postgres"
-   docker compose logs --since 5m core | grep -E "REGISTER ok|auth"    # one 401 round, then "REGISTER ok" per device
-   docker compose exec postgres psql -U thundervox -d thundervox -c "select username, received, expires from location"
-   ```
-
-   `TVX_PROVISIONING` missing from the list = the core runs without it: the define is misspelled or still
-   `##!define`, it sits in a file other than the mounted one (`docker inspect thundervox-core --format
-   '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'` shows which host file the core reads), or
-   the container was never recreated after the edit (a plain `docker compose up -d` does not do that).
+`push.sh --dry-run` previews an upload. With no file arguments it sends the
+Compose file and ignored `console.conf`, then validates remotely. SSH parameters
+come from ignored `.deploy.env` or environment overrides. Credentials and core
+configuration are sent only when explicitly named. The script does not pull
+images or activate services; `--restart` is rejected. Activation, nginx reload,
+runtime checks and rollback follow the operator's private procedure.
 
 ## Service API for the operator's backend
 
-The operator's backend (for Modus: tv-sip in modusclientapi) provisions SIP accounts itself through
+The operator's backend provisions SIP accounts itself through
 `https://server.<domain>/api/v1/service/...`. Access is by a **service token** the super administrator issues on
 the console's **Integration** page (shown once, stored as a hash, revocable; any number of named tokens), sent
 in the `X-SERVICE-TOKEN` header. The page also lists every call below with the public address filled in and a
 copy button. Numbers are addressed by the endpoint's id in the operator's own system, the `external_id`: a panel
-by its device id (Modus: the `host:port` of `controls/devices`, which selects the video shown when it calls), an
+by its device id, an
 app client by the subscriber account (whom to wake with a push). The same id always gets the same number; a
 disabled number comes back with the next PUT. `kind` is `PANEL` or `CLIENT`.
 
@@ -120,7 +48,7 @@ disabled number comes back with the next PUT. `kind` is `PANEL` or `CLIENT`.
 
 ```bash
 curl -s -X PUT -H "X-SERVICE-TOKEN: tvx_…" -H "Content-Type: application/json" \
-  -d '{"name":"Маяковского 14, кв. 11"}' https://server.<domain>/api/v1/service/sip-accounts/CLIENT/1234567890
+  -d '{"name":"Example client"}' https://server.<domain>/api/v1/service/sip-accounts/CLIENT/example-client
 ```
 
 The response carries `username`, `realm` / `sip_domain` and - only on creation or rotation - `password`: exactly
@@ -142,7 +70,7 @@ To switch the core's side on:
 1. `.env`: `TVX_CORE_TOKEN` (`openssl rand -hex 32`), then `docker compose up -d server` - the server log says
    `Internal API enabled`.
 2. `local.cfg`: the same value as `#!substdef "!TVX_CORE_TOKEN!…!g"` and `#!define TVX_PUSH_WAIT` (one `#`),
-   then `systemctl reload thundervox` (config check + recreate of the core). `TVX_PUSH_URL` / `TVX_PUSH_TOKEN`
+   then validate and apply the core configuration under the operator's procedure. `TVX_PUSH_URL` / `TVX_PUSH_TOKEN`
    of core 0.10 and earlier are gone - remove them from `local.cfg`.
 3. On the Integration page: URL and header of the operator's backend, **Test push** → the result shows
    `DELIVERED` and the backend's echo (and so does the Events page). Then enable the switch on the page.
@@ -152,128 +80,16 @@ To switch the core's side on:
 `https://server.<domain>/api/v1/internal/…` and the console's `/api/v1/internal/…` answer `404` by design: the
 internal API is reachable on loopback only, with the token.
 
-Day-to-day start of everything: `COMPOSE_PROFILES=provisioning` in `.env`, then `docker compose up -d` (or the
-system service below). The edge proxy comes up with this profile and takes over the public names:
+Select application components with `COMPOSE_PROFILES=provisioning` in `.env`. The operator configures public routing:
 `https://console.<domain>` is the console, `https://server.<domain>` the API. Nothing listens on a public port
 except the edge and the SIP core.
 
-## System service
+## Component updates
 
-`thundervox.service` runs this directory as one unit: config check of the core, then `docker compose up -d`;
-stop is `docker compose down`. Which services start is `COMPOSE_PROFILES` in `.env` - the same set a manual
-`docker compose` here sees. The committed unit points at `/opt/thundervox/deploy`; installing renders it with the
-real path of the checkout:
-
-```bash
-cd /opt/thundervox/deploy               # wherever the umbrella repository is cloned
-sed "s#/opt/thundervox/deploy#$PWD#" thundervox.service > /etc/systemd/system/thundervox.service
-systemctl daemon-reload
-systemctl enable --now thundervox
-systemctl status thundervox             # "active (exited)" is right: the unit is a oneshot, the containers run
-```
-
-| Action | Command |
-|---|---|
-| start / stop the whole system | `systemctl start thundervox` / `systemctl stop thundervox` |
-| apply a `git pull`, pulled images, an edited `.env` or `local.cfg` | `systemctl reload thundervox` (recreates what changed, and the core every time) |
-| logs of one service | `docker compose logs -f <service>` (the unit itself logs only the compose calls: `journalctl -u thundervox`) |
-
-`reload` recreates the core container every time, even when nothing else changed: Compose recreates a container
-only when the service definition or the image changed, and an edited bind-mounted `local.cfg` is neither - without
-the forced recreation a switch flipped in `local.cfg` would never reach the running core (Kamailio reads its config
-at start only). With `TVX_PROVISIONING` the registrations survive it, they are in PostgreSQL; without it devices
-re-REGISTER within their own interval.
-
-`stop` removes the containers, so their `docker compose logs` go with them; the `postgres-data` volume and every
-file in this directory stay. A crashed container is restarted by Docker itself (`restart: always`), the unit is
-not involved. Re-render the unit after a change of `thundervox.service` in the repository (same `sed`, then
-`systemctl daemon-reload`).
-
-## TLS
-
-The edge proxy (Caddy) obtains and renews every certificate itself over an ACME HTTP challenge and keeps them
-in `edge-data/`. There is no certbot, no cron job and no renewal hook to maintain. Private keys never leave the
-host - `edge-data/` is gitignored, and so are `.env`, `local.cfg` and `tls.cfg`.
-
-First start, and after any change of a name in `.env`:
-
-```bash
-docker compose --profile provisioning up -d edge
-docker compose logs edge | grep -iE "certificate|obtain|error"   # expect "certificate obtained successfully"
-curl -sI https://console.<domain> | head -3
-curl -s  https://server.<domain>/api/v1/info
-```
-
-A name that does not resolve to this host fails the challenge; Caddy then retries with a growing backoff, so
-fix the DNS record and `docker compose restart edge` instead of waiting.
-
-### SIP over TLS (`TVX_TLS`)
-
-The core reads the certificate the edge proxy already holds for `sip.<domain>`; plain 5060 keeps working, so
-panels whose firmware has no TLS are unaffected.
-
-```bash
-# 1. find the real path - it carries the ACME directory the certificate came from
-docker compose exec edge find /data/caddy/certificates -name '*.crt'
-# 2. put that path (with /data replaced by /tls, which is where the core mounts the same directory) into tls.cfg
-# 3. switch it on in local.cfg: #!define TVX_TLS      (requires TVX_SIP_DOMAIN - a certificate is issued for a
-#    name, never for an IP; without it the config check fails with a TVX_TLS_NEEDS_TVX_SIP_DOMAIN… token)
-docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg
-docker compose up -d core
-docker compose logs core | grep -i tls
-```
-
-Renewal: Caddy rewrites the files in place roughly 30 days before expiry, and the running core keeps the old
-certificate in memory until it is told to re-read `tls.cfg`. A daily reload on the host covers it - idempotent,
-and cheaper than discovering an expired certificate:
-
-```
-# /etc/cron.d/thundervox-tls-reload
-23 4 * * * root docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl tls.reload >/dev/null 2>&1
-```
-
-If a reload ever does not pick a renewed file up, `docker compose up -d --force-recreate core` always does -
-at the cost of the in-memory registrations (devices re-REGISTER within about ten seconds).
-
-## Other products on this host (`deploy/sites/`)
-
-The edge owns ports 80 and 443, so another product on the same host does not run an edge of its own: it drops its
-site blocks into `deploy/sites/<product>.caddy` and reloads this edge. The Caddyfile imports `sites/*.caddy`; the
-directory is mounted read-only into the container and is gitignored - it is written on the host by the other
-product's deployment (Pathfinder: `deployment/cohost.sh` in `beiroun/pathfinder`). Empty, it imports nothing.
-
-```bash
-ls deploy/sites/                                                     # who else is served here
-docker compose exec edge caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-docker compose exec edge caddy reload   --config /etc/caddy/Caddyfile --adapter caddyfile
-```
-
-The other product's certificates land in the same `edge-data/` and renew with ours. Its services listen on
-loopback ports of their own - ThunderVox keeps 5432, 8080, 8081 (and 4444, 2019 of rtpengine and Caddy). A
-broken file in `sites/` fails `caddy reload` and leaves the running config as it was; a broken file at a
-container start fails the edge, so `cohost.sh` validates before it reloads and puts the previous file back on
-failure.
-
-## Updating a component
-
-1. Bump the image tag of the service in `docker-compose.yml` (component repositories publish
-   `ghcr.io/beiroun/<repo>:X.Y.Z` on their `vX.Y.Z` tags; `latest` does not exist).
-2. Commit and push the umbrella repository.
-3. On the server:
-
-```bash
-cd /opt/thundervox/deploy && git pull
-docker compose pull <service>
-docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg   # when the core or local.cfg changed
-docker compose up -d <service>
-```
-
-With the system service installed, the last two lines are `systemctl reload thundervox` - it runs the same check,
-recreates what changed and always recreates the core (see "System service").
-
-Core and rtpengine always move together (same repository, same tag). A `kamailio.cfg` change ships as a new core
-tag; a `local.cfg` change is a config check plus `docker compose up -d --force-recreate core` - a plain `up -d`
-sees no change in the service definition and leaves the running core, with its old config, alone.
+Bump the exact image tag in docker-compose.yml after the release image exists.
+Core and rtpengine move together. Applying the selected image follows the
+operator's private deployment procedure. A database rollback across a migration needs
+a database restore, not merely an older image. Existing domain release notes:
 
 **Server 0.6 / console 0.7 / core 0.11 (the Integration page).** `.env`: drop `TVX_SERVICE_TOKEN`, add
 `TVX_CORE_TOKEN`; the compose file passes `TVX_PUBLIC_API_URL` from `TVX_SERVER_HOST`. The service API refuses
@@ -308,91 +124,21 @@ journal's lines of subscribers and numbers without an account and adds `call_log
 on only panels get journal lines (every number still keeps its state). The dashboard's "registrations" are
 panels coming online. Nothing to configure.
 
-### Pushing from the laptop (`push.sh`)
+## TLS ownership
 
-The same update without logging in by hand: `push.sh` uploads the deploy files over sftp and runs the
-steps above on the host - `docker compose pull`, then `systemctl reload thundervox` (changed containers are
-recreated, the core always), then `docker compose ps`. Where the host is and how to log in come from
-`deploy/.deploy.env` (gitignored; copy `.deploy.env.example` and fill `TVX_DEPLOY_TARGET`, `TVX_DEPLOY_PORT`,
-`TVX_DEPLOY_DIR` and `TVX_DEPLOY_KEY`). sftp runs in batch mode and cannot ask for a password, so the login is
-a key: `ssh-keygen -t ed25519 -f ~/.ssh/thundervox -N ''`, then `ssh-copy-id -i ~/.ssh/thundervox.pub -p <port>
-<user@host>` once (that asks the password), then `TVX_DEPLOY_KEY=~/.ssh/thundervox`. A password is possible
-instead (`TVX_DEPLOY_PASSWORD`, needs `sshpass` on the laptop), the key is cleaner.
+The operator supplies certificates through `TVX_TLS_DATA_DIR`, mounted read-only
+at `/tls`. Set tls.cfg paths to the actual container-visible files and verify
+read permissions for the core's runtime user. Renewal and application of renewed
+certificates belong to the private operating procedure. Never commit key material.
 
-```bash
-deploy/push.sh                 # docker-compose.yml, Caddyfile, thundervox.service + the site-local files that
-                               # exist on the laptop (.env, local.cfg, tls.cfg) -> pull -> reload
-deploy/push.sh local.cfg       # one named file instead (any file of this directory)
-deploy/push.sh --restart       # stop + start of the whole stack instead of a reload: every call drops
-deploy/push.sh --dry-run       # show the sftp batch and the remote commands, change nothing
-```
+## Acceptance
 
-The site-local files are edited on the laptop and travel with every push; the host only runs them. Before one
-of them is replaced, the copy that was on the host is moved to `<file>.prev` (one generation): a wrong push is
-undone with `mv local.cfg.prev local.cfg && systemctl reload thundervox`. A site-local file missing on the laptop
-is not sent and nothing on the host is removed. The reload recreates the core, so a changed `local.cfg` takes
-effect at once (check with `kamcmd core.ppdefines`); a changed `.env` reaches the other containers the same way.
-
-When `thundervox.service` is among the sent files the unit is re-rendered with the host's path and
-`systemctl daemon-reload` runs, as in "System service". The committed files still go through git as before - the
-script only replaces the `git pull` on the host with an upload of what is on the laptop, committed or not.
-
-## Pinned versions
-
-Nothing runs or builds from a floating version (rule of 2026-10-22, after `postgres:18` was re-pulled under the
-same tag). Every external input is pinned exactly, and a bump is a deliberate change of the pin:
-
-| Where | Pin |
-|---|---|
-| this compose | `postgres:18.6-trixie@sha256:edb0c08d…` (PostgreSQL 18.6-1.pgdg13+2), `caddy:2.11.6@sha256:3422ce6d…`; own images by exact `X.Y.Z` |
-| core and rtpengine images | Dockerfile frontend `docker/dockerfile:1.28.0@sha256:…`, `debian:trixie-20261020-slim@sha256:…`, apt packages from the snapshot.debian.org state that base was built from (`20261020T213255Z`), Kamailio `6.0.8` = commit `73c93991…`, rtpengine `mr26.2.1.2` = commit `56c71c86…` |
-| server image | `eclipse-temurin:25.0.4.1_1-jdk-noble` / `-jre-noble` by digest, Gradle `9.8.0` with `distributionSha256Sum`, libraries by exact version (Spring Boot BOM) |
-| web image | `node:24.22.1-trixie-slim`, `nginx:1.30.6-trixie` by digest, npm packages from `package-lock.json` (`npm ci`) |
-| CI | GitHub Actions by commit SHA (version in a comment), buildx `v0.38.1`, BuildKit `moby/buildkit:v0.34.1@sha256:…`, runner `ubuntu-24.04` |
-
-A digest is pinned next to the tag (`image:tag@sha256:…`): the tag says what it is, the digest makes it
-immutable - Docker pulls by the digest and ignores the tag. The digest is the multi-platform index, so the same
-line works on the amd64 host and on an arm64 laptop.
-
-Bumping a pin: pick the exact new version, check **before** writing it down that it resolves and downloads
-(registry API: tag -> index digest -> linux/amd64 manifest -> every layer blob answers; for an action
-`git ls-remote` of the tag; for apt the snapshot's `InRelease` and the packages in its `Packages`), write tag and
-digest together, let CI build it, then update. A database bump stays a major event of its own: a minor of the
-same major (18.6 -> 18.7) is a restart, a new major needs `pg_upgrade` or a dump - never through this file alone.
-
-## Rollback
-
-Revert the tag in `docker-compose.yml` (or `git revert` the bump), `git pull` on the server,
-`docker compose up -d <service>`. The previous image is still in the local cache, so the rollback is seconds.
-Database migrations are forward-only: rolling the server back past a migration needs a restore of
-`postgres-data`, not just an older image.
-
-## Checks
-
-```bash
-docker compose ps
-test -f local.cfg -a -f tls.cfg || echo "local.cfg or tls.cfg is missing or is a directory"
-docker compose logs --since 10m core | grep TVX                    # routing decisions, one line per step
-docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl ul.dump      # registrations
-docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl dlg.list     # live calls
-docker exec thundervox-core kamcmd -s unix:/tmp/kamailio_ctl rtpengine.show all
-curl -s http://127.0.0.1:8080/api/v1/system/health                 # server, directly on loopback
-curl -s http://127.0.0.1:8081/api/v1/info                          # console nginx -> server
-curl -s https://console.<domain>/api/v1/info                       # edge -> console nginx -> server
-curl -s https://server.<domain>/api/v1/info                        # edge -> server
-curl -s -o /dev/null -w '%{http_code}\n' https://server.<domain>/api/v1/internal/push/wake   # 404: closed on the edge
-docker compose exec edge find /data/caddy/certificates -name '*.crt'   # which names hold a certificate
-```
-
-SIP on the wire: `sngrep` on the host (`apt install sngrep`) shows every dialog; one call is one `grep <Call-ID>`
-in the core log.
+At the configured application endpoints, verify API info, console-to-API access,
+blocked public internal routes, call journaling and a real wake push. An upload
+or a configuration validation alone does not demonstrate a successful deployment.
 
 ## Backup
 
-What matters on the host: `.env`, `local.cfg`, `tls.cfg` and the `postgres-data` volume (Docker name `thundervox_postgres-data`; accounts, HA1
-hashes, registrations). `docker compose exec postgres pg_dump -U thundervox thundervox > thundervox-$(date +%F).sql`
-for a logical dump. Images are reproducible from the registry and need no backup.
-
-`edge-data/` is worth keeping too, though it is not critical: the certificates would be re-issued on a fresh
-host automatically. What a backup saves is the ACME account and a brush with the CA's rate limits when a host
-is rebuilt repeatedly.
+Securely retain ignored configuration and a PostgreSQL backup under the
+operator's policy. Preserve existing database storage and certificate material.
+Never use `docker compose down -v` as a migration or rollback step.
