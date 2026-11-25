@@ -152,7 +152,7 @@ services:
     restart: always
 
   web:
-    image: ghcr.io/beiroun/thundervox-web:0.14.0
+    image: ghcr.io/beiroun/thundervox-web:0.15.0
     container_name: thundervox-web
     profiles: ["provisioning"]
     network_mode: host                       # listeners and upstreams are set in site-local console.conf
