@@ -61,9 +61,10 @@
 # Request-rate guard per source IP (pike): >32 requests / 2 s -> dropped.
 ##!define TVX_ANTIFLOOD
 
-# Accept SIPS on 5061 in addition to plain 5060. Requires TVX_SIP_DOMAIN (a
-# certificate is issued for a name, not for an IP) and a filled-in tls.cfg next
-# to this file - its template ships in the image as
-# /etc/kamailio/tls.cfg.example. Plain 5060 keeps working for devices whose
+# Accept SIPS on TVX_SIPS_PORT in addition to plain SIP on TVX_SIP_PORT (both
+# set in .env, 5061 / 5060 by default - ports never go into this file).
+# Requires TVX_SIP_DOMAIN (a certificate is issued for a name, not for an IP)
+# and a filled-in tls.cfg next to this file - its template ships in the image as
+# /etc/kamailio/tls.cfg.example. Plain SIP keeps working for devices whose
 # firmware has no TLS.
 ##!define TVX_TLS

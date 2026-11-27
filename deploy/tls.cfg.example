@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BUSL-1.1
 # Copyright (c) 2026 Andrei Baranov (84softworks). Licensed under the Business Source License 1.1 - see LICENSE.
-# ThunderVox - TLS profiles for SIPS on 5061 (template)
+# ThunderVox - TLS profiles for SIPS on TVX_SIPS_PORT, 5061 by default (template)
 # =====================================================
 # Only read when TVX_TLS is defined in local.cfg. Copy to tls.cfg next to it in the deployment directory
 # (thundervox/deploy/) - it names site-local file paths and is gitignored like local.cfg.

@@ -22,7 +22,12 @@
 # Config check of the core before (re)starting it - fails fast on a typo in local.cfg:
 #   docker compose run --rm core -c -f /etc/kamailio/kamailio.cfg
 #
-# Firewall: UDP+TCP 5060 (SIP), UDP 29000-30000 (RTP), TCP 5061 (SIPS, with TVX_TLS), TCP 80 + 443 (edge; 80
+# Ports are set once in .env and reach every service that needs them: TVX_SIP_PORT / TVX_SIPS_PORT the core and the
+# server (the console shows them), TVX_RTP_NG_PORT the core and rtpengine, TVX_RTP_PORT_MIN/MAX rtpengine. Two
+# deployments on one host (prod and dev) take different values of each.
+#
+# Firewall: UDP+TCP TVX_SIP_PORT (5060), UDP TVX_RTP_PORT_MIN-MAX (29000-30000), TCP TVX_SIPS_PORT (5061, with
+# TVX_TLS), TCP 80 + 443 (edge; 80
 # is required even for an HTTPS-only site - the ACME challenge and the redirect to HTTPS both use it).
 
 # Pinned project name. Without it Compose takes the directory name ("deploy"), and the database volume is named
@@ -31,7 +36,7 @@ name: thundervox
 
 services:
   core:
-    image: ghcr.io/beiroun/thundervox-core:0.12.2
+    image: ghcr.io/beiroun/thundervox-core:0.13.0
     container_name: thundervox-core
     network_mode: host
     # Long syntax with create_host_path: false on every host path. The short form creates a missing source as an
@@ -61,22 +66,26 @@ services:
         bind:
           create_host_path: false
     environment:
+      # kamailio.cfg reads these with #!trydefenv; listen, advertise and alias all follow them
+      TVX_SIP_PORT: "${TVX_SIP_PORT:-5060}"
+      TVX_SIPS_PORT: "${TVX_SIPS_PORT:-5061}"
+      TVX_RTPENGINE_SOCK: "udp:127.0.0.1:${TVX_RTP_NG_PORT:-4444}"
       TZ: "Asia/Omsk"
     depends_on:
       - rtpengine            # ordering only; the core retries the ng socket at runtime
     restart: always
 
   rtpengine:
-    image: ghcr.io/beiroun/thundervox-rtpengine:0.12.2
+    image: ghcr.io/beiroun/thundervox-rtpengine:0.13.0
     container_name: thundervox-rtpengine
     network_mode: host
     environment:
       # fails fast if .env is missing instead of advertising media on a bogus address
       TVX_PUBLIC_IP: "${TVX_PUBLIC_IP:?set TVX_PUBLIC_IP in deploy/.env}"
       TVX_LOCAL_IP: "${TVX_LOCAL_IP:-}"       # only when the host's interface address differs from the public one (1:1 NAT)
-      TVX_RTP_NG_PORT: "4444"                 # ng control port on 127.0.0.1; the core's TVX_RTPENGINE_SOCK points here
-      TVX_RTP_PORT_MIN: "29000"               # narrow test pool (~250 concurrent calls); widen for production
-      TVX_RTP_PORT_MAX: "30000"
+      TVX_RTP_NG_PORT: "${TVX_RTP_NG_PORT:-4444}"     # ng control port on 127.0.0.1; the core's TVX_RTPENGINE_SOCK points here
+      TVX_RTP_PORT_MIN: "${TVX_RTP_PORT_MIN:-29000}"  # narrow test pool (~250 concurrent calls); widen for production
+      TVX_RTP_PORT_MAX: "${TVX_RTP_PORT_MAX:-30000}"
       TVX_RTP_LOG_LEVEL: "${TVX_RTP_LOG_LEVEL:-6}"   # 6=info; 7 for verbose media debug
       TZ: "Asia/Omsk"
     restart: always
@@ -107,7 +116,7 @@ services:
     restart: always
 
   server:
-    image: ghcr.io/beiroun/thundervox-server:0.12.0
+    image: ghcr.io/beiroun/thundervox-server:0.13.0
     container_name: thundervox-server
     profiles: ["provisioning"]
     network_mode: host
@@ -126,6 +135,8 @@ services:
       # Digest realm of every issued SIP password = the SIP name devices register to (the core's TVX_SIP_DOMAIN).
       # Hashed into each stored HA1: a different name later makes every issued password useless.
       TVX_SIP_REALM: "${TVX_SIP_HOST:-}"
+      # The port the core listens on (the same .env value the core gets), shown on the console's About and Dashboard
+      TVX_SIP_PORT: "${TVX_SIP_PORT:-5060}"
       # Console access: token signing key and the super administrator (empty -> the server refuses to start)
       TVX_JWT_SECRET: "${TVX_JWT_SECRET:-}"
       TVX_SUPERADMIN_LOGIN: "${TVX_SUPERADMIN_LOGIN:-}"
@@ -152,7 +163,7 @@ services:
     restart: always
 
   web:
-    image: ghcr.io/beiroun/thundervox-web:0.15.1
+    image: ghcr.io/beiroun/thundervox-web:0.16.0
     container_name: thundervox-web
     profiles: ["provisioning"]
     network_mode: host                       # listeners and upstreams are set in site-local console.conf
